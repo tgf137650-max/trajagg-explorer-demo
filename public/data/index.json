@@ -1,0 +1,49 @@
+{
+  "prototypeNote": "This page is driven by local static example JSON; every distance, similarity score, and trajectory ID is for interaction only.",
+  "dataOrigin": "Data source: public/data/index.json and public/data/cases/*.json (currently example data).",
+  "config": {
+    "dataset": "Porto",
+    "supervisionMetric": "Hausdorff",
+    "retrievalDistance": "Chebyshev",
+    "gridCellSize": "100 m",
+    "mu": "0.5",
+    "trainMode": "Hybrid"
+  },
+  "queries": [
+    {
+      "id": "Q-0001",
+      "title": "Ribeira morning route",
+      "startTime": "May 12, 08:15",
+      "distanceKm": 15.4,
+      "durationMin": 27
+    },
+    {
+      "id": "Q-0002",
+      "title": "Boavista cross-city route",
+      "startTime": "May 12, 09:02",
+      "distanceKm": 14.7,
+      "durationMin": 26
+    },
+    {
+      "id": "Q-0003",
+      "title": "Downtown eastbound route",
+      "startTime": "May 12, 09:45",
+      "distanceKm": 16.1,
+      "durationMin": 30
+    },
+    {
+      "id": "Q-0004",
+      "title": "Foz afternoon route",
+      "startTime": "May 12, 10:32",
+      "distanceKm": 13.8,
+      "durationMin": 24
+    },
+    {
+      "id": "Q-0005",
+      "title": "Porto riverside route",
+      "startTime": "May 12, 11:18",
+      "distanceKm": 15,
+      "durationMin": 28
+    }
+  ]
+}
