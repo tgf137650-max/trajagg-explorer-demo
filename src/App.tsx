@@ -25,7 +25,34 @@ type Candidate = {
   predictedSimilarity: number;
   hausdorffDistance?: number;
   hausdorffUnit?: string;
+  groundTruthRank: number;
+  inGroundTruthTop10: boolean;
+  inGroundTruthTop50: boolean;
   note: string;
+};
+
+type TimingStats = {
+  medianMs: number;
+  meanMs: number;
+  p95Ms: number;
+  minMs: number;
+  maxMs: number;
+};
+
+type QueryTiming = {
+  learned: {
+    preprocess: TimingStats;
+    encode: TimingStats;
+    chebyshevDistanceAndTopK: TimingStats;
+    total: TimingStats;
+    maxAbsErrorVsSavedEmbedding: number;
+  };
+  directHausdorff: {
+    distanceComputationMs: number;
+    topKSortMs: number;
+    totalMs: number;
+  };
+  speedupVsDirectHausdorff: number;
 };
 
 type CaseData = {
@@ -42,6 +69,7 @@ type CaseData = {
     embeddingDimension: number;
   };
   provenance: { kind: string; bestEpoch: number; selectionRule: string };
+  timing: QueryTiming;
 };
 
 type Reproduction = {
@@ -57,6 +85,27 @@ type IndexData = {
   dataOrigin: string;
   config: Record<string, string>;
   reproduction: Reproduction;
+  benchmark: {
+    status: string;
+    protocol: {
+      statement: string;
+      queryCount: number;
+      librarySize: number;
+      embeddingDimension: number;
+      topK: number;
+      warmupRunsPerQuery: number;
+      measuredRunsPerQuery: number;
+      learnedMethod: string;
+      directBaseline: string;
+      cudaSynchronization: boolean;
+    };
+    environment: { gpu: string; torch: string; cuda: string };
+    summary: {
+      trajaggMedianAcrossQueriesMs: number;
+      directHausdorffMedianAcrossQueriesMs: number;
+      medianSpeedupAcrossQueries: number;
+    };
+  };
   queries: QuerySummary[];
 };
 
@@ -202,17 +251,22 @@ function MapCanvas({ caseData, topK, activeCandidate, gpsVisible, gridVisible, o
             </Polyline>
           );
         })}
-        {gridVisible && <Polyline positions={gridRoute} pathOptions={{ color: '#0b5fc5', weight: 3, opacity: 0.72, dashArray: '7 7', lineCap: 'square' }}><Tooltip sticky>Query · 100 m grid cells</Tooltip></Polyline>}
         {gpsVisible && <>
-          <Polyline positions={queryRoute} pathOptions={{ color: '#ffffff', weight: 8, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} interactive={false} />
-          <Polyline positions={queryRoute} pathOptions={{ color: '#086fe8', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }}><Tooltip sticky>Query · {caseData.id}</Tooltip></Polyline>
+          <Polyline positions={queryRoute} pathOptions={{ color: '#ffffff', weight: 8, opacity: gridVisible ? 0.56 : 0.92, lineCap: 'round', lineJoin: 'round' }} interactive={false} />
+          <Polyline positions={queryRoute} pathOptions={{ color: '#086fe8', weight: 5, opacity: gridVisible ? 0.5 : 1, lineCap: 'round', lineJoin: 'round' }}><Tooltip sticky>Query GPS · {caseData.id}</Tooltip></Polyline>
           <CircleMarker center={queryRoute[0]} radius={6} pathOptions={{ color: '#086fe8', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}><Tooltip direction="top">Query start</Tooltip></CircleMarker>
           <CircleMarker center={queryRoute.at(-1)!} radius={6} pathOptions={{ color: '#086fe8', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}><Tooltip direction="top">Query end</Tooltip></CircleMarker>
+        </>}
+        {gridVisible && <>
+          <Polyline positions={gridRoute} pathOptions={{ color: '#ffffff', weight: 9, opacity: 0.94, lineCap: 'square', lineJoin: 'miter' }} interactive={false} />
+          <Polyline positions={gridRoute} pathOptions={{ color: '#073c8f', weight: 5, opacity: 1, dashArray: '5 7', lineCap: 'square', lineJoin: 'miter' }}><Tooltip sticky>Query · 100 m grid-cell centres</Tooltip></Polyline>
+          {gridRoute.filter((_, index) => index === 0 || index === gridRoute.length - 1 || index % Math.max(1, Math.ceil(gridRoute.length / 36)) === 0).map((position, index) => <CircleMarker key={`${position[0]}-${position[1]}-${index}`} center={position} radius={2.6} pathOptions={{ color: '#073c8f', fillColor: '#ffffff', fillOpacity: 1, opacity: 1, weight: 1.4 }} interactive={false} />)}
         </>}
       </MapContainer>
       <div className="map-label">Porto · real WGS84 coordinates</div>
       <div className="map-legend" aria-label="Route colour legend">
         <span><i className="legend-line legend-line--query" />Query</span>
+        {gridVisible && <span><i className="legend-line legend-line--grid" />100 m grid</span>}
         {candidates.map((candidate) => <span key={candidate.id}><i className="legend-line" style={{ background: candidate.color }} />Top-{candidate.rank}</span>)}
       </div>
       <div className="map-toggle-group">
@@ -243,10 +297,41 @@ function ModelTrace({ caseData, expanded, onToggle, topK }: { caseData: CaseData
   );
 }
 
+function GroundTruthBadge({ candidate }: { candidate: Candidate }) {
+  const tier = candidate.inGroundTruthTop10 ? 'top10' : candidate.inGroundTruthTop50 ? 'top50' : 'outside';
+  return <span className={`gt-rank-badge gt-rank-badge--${tier}`}>Hausdorff GT <b>#{candidate.groundTruthRank}</b></span>;
+}
+
+function EfficiencyPanel({ caseData, benchmark }: { caseData: CaseData; benchmark: IndexData['benchmark'] }) {
+  const timing = caseData.timing;
+  return (
+    <section className="efficiency-panel" aria-label="Measured retrieval efficiency">
+      <div className="efficiency-heading"><div><span>MEASURED ON RTX 3090</span><b>Retrieval efficiency</b></div><em>Real benchmark</em></div>
+      <div className="efficiency-values">
+        <span><small>TrajAgg online</small><strong>{timing.learned.total.medianMs.toFixed(2)} <i>ms</i></strong></span>
+        <span><small>Direct Hausdorff</small><strong>{timing.directHausdorff.totalMs.toFixed(1)} <i>ms</i></strong></span>
+        <span className="speedup-value"><small>Speedup</small><strong>{timing.speedupVsDirectHausdorff.toFixed(1)}<i>×</i></strong></span>
+      </div>
+      <details className="efficiency-details">
+        <summary>Timing protocol &amp; stage breakdown</summary>
+        <div className="timing-breakdown"><span>Preprocess <b>{timing.learned.preprocess.medianMs.toFixed(2)} ms</b></span><span>GPU encode <b>{timing.learned.encode.medianMs.toFixed(2)} ms</b></span><span>Chebyshev + Top-k <b>{timing.learned.chebyshevDistanceAndTopK.medianMs.toFixed(2)} ms</b></span></div>
+        <p>Median of {benchmark.protocol.measuredRunsPerQuery} timed runs after {benchmark.protocol.warmupRunsPerQuery} warmups; {benchmark.protocol.librarySize.toLocaleString()} vectors, CUDA synchronized. Direct baseline uses author <code>traj-dist</code> Hausdorff on one CPU process. Matrix lookup and browser rendering are excluded. <a href={`${DATA_ROOT}retrieval_benchmark.json`} target="_blank" rel="noreferrer">Open benchmark JSON</a></p>
+      </details>
+    </section>
+  );
+}
+
 function ResultCard({ candidate, selected, onSelect, onWhy }: { candidate: Candidate; selected: boolean; onSelect: () => void; onWhy: () => void }) {
   return (
     <article className={`result-card ${selected ? 'result-card--selected' : ''}`} style={{ '--accent': candidate.color } as CSSProperties}>
-      <button className="result-main" onClick={onSelect} aria-label={`View candidate trajectory ${candidate.id}`}><span className="rank-dot">{candidate.rank}</span><div className="result-title"><strong>{candidate.id}</strong><i /></div><dl><div><dt>Chebyshev embedding distance <em>exported</em></dt><dd>{formatDistance(candidate.chebyshevDistance)}</dd></div><div><dt>Predicted similarity <em>exp(−distance)</em></dt><dd>{candidate.predictedSimilarity.toFixed(6)}</dd></div>{candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance <em>WGS84 space</em></dt><dd>{formatDistance(candidate.hausdorffDistance)}</dd></div>}</dl></button>
+      <button className="result-main" onClick={onSelect} aria-label={`View candidate trajectory ${candidate.id}`}>
+        <span className="rank-dot">{candidate.rank}</span>
+        <div className="result-title"><span><strong>{candidate.id}</strong><GroundTruthBadge candidate={candidate} /></span><i /></div>
+        <dl>
+          <div><dt>Chebyshev embedding distance <em>online ranking</em></dt><dd>{formatDistance(candidate.chebyshevDistance)}</dd></div>
+          {candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance <em>offline evaluation</em></dt><dd>{formatDistance(candidate.hausdorffDistance)}</dd></div>}
+        </dl>
+      </button>
       <button className="why-button" onClick={onWhy}>Why this candidate? <span>›</span></button>
     </article>
   );
@@ -260,8 +345,8 @@ function WhyDrawer({ caseData, candidate, onClose }: { caseData: CaseData; candi
     <div className="drawer-backdrop" role="presentation" onMouseDown={onClose}><aside className="why-drawer" role="dialog" aria-modal="true" aria-label="Candidate explanation" onMouseDown={(event) => event.stopPropagation()}>
       <div className="drawer-head"><div><span className="eyebrow">REAL RETRIEVAL EXPLANATION</span><h2>Why this candidate?</h2></div><button onClick={onClose} aria-label="Close candidate explanation">×</button></div>
       <div className="drawer-map"><svg viewBox="0 0 100 70" role="img" aria-label="Query and candidate trajectory overlay"><polyline points={pointString(candidateRoute)} fill="none" stroke={candidate.color} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" /><polyline points={pointString(queryRoute)} fill="none" stroke="#1674e8" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" /></svg><span className="drawer-legend"><i className="legend-line legend-line--query" /> Query <i className="legend-line" style={{ background: candidate.color }} /> Candidate</span></div>
-      <h3>Rank {candidate.rank} · {candidate.id}</h3><dl className="drawer-metrics"><div><dt>Chebyshev embedding distance</dt><dd>{formatDistance(candidate.chebyshevDistance)} <em>exported</em></dd></div><div><dt>Predicted similarity</dt><dd>{candidate.predictedSimilarity.toFixed(6)} <em>exp(−d)</em></dd></div>{candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance</dt><dd>{formatDistance(candidate.hausdorffDistance)} <em>{candidate.hausdorffUnit ?? 'WGS84 units'}</em></dd></div>}</dl>
-      <div className="explanation-note"><b>How to interpret this</b><p>This real test-library candidate has one of the smallest Chebyshev distances to the query embedding. Hausdorff is retained as offline supervision/evaluation ground truth and is not recomputed for online ranking.</p></div><p className="candidate-note">{candidate.note}</p>
+      <div className="drawer-rank-title"><h3>Model rank #{candidate.rank} · {candidate.id}</h3><GroundTruthBadge candidate={candidate} /></div><dl className="drawer-metrics"><div><dt>Chebyshev embedding distance</dt><dd>{formatDistance(candidate.chebyshevDistance)} <em>online</em></dd></div><div><dt>Hausdorff ground-truth rank</dt><dd>#{candidate.groundTruthRank} <em>{candidate.inGroundTruthTop10 ? 'GT Top-10' : candidate.inGroundTruthTop50 ? 'GT Top-50' : 'outside GT Top-50'}</em></dd></div>{candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance</dt><dd>{formatDistance(candidate.hausdorffDistance)} <em>{candidate.hausdorffUnit ?? 'WGS84 units'}</em></dd></div>}<div><dt>Derived display similarity</dt><dd>{candidate.predictedSimilarity.toFixed(6)} <em>exp(−d)</em></dd></div></dl>
+      <div className="explanation-note"><b>How to interpret this</b><p>The model rank comes from Chebyshev distance in embedding space. The ground-truth rank is obtained by sorting the precomputed Hausdorff distances for this query; it is used for supervision and evaluation, not for online ranking or timing.</p></div><p className="candidate-note">{candidate.note}</p>
     </aside></div>
   );
 }
@@ -355,10 +440,10 @@ export default function App() {
         <section className="map-panel">
           <MapCanvas caseData={caseData} topK={topK} activeCandidate={activeCandidate} gpsVisible={gpsVisible} gridVisible={gridVisible} onCandidateClick={setActiveCandidate} onGpsToggle={() => setGpsVisible((value) => !value)} onGridToggle={() => setGridVisible((value) => !value)} />
           {retrieving && <div className="retrieval-toast" role="status"><span className="spinner" /><div><b>{RETRIEVAL_STEPS[retrievalStep]}</b><p>{retrievalStep === 0 ? 'Mercator, 100 m grid mapping, and padding' : retrievalStep === 1 ? 'Read the saved 128-D query embedding from the best checkpoint artifact' : retrievalStep === 2 ? 'Rank the 7,000-trajectory test library by Chebyshev distance' : 'Display the real exported Top-k candidates'}</p></div><i>{retrievalStep + 1}/4</i></div>}
-          <div className="map-footer"><span>Blue: real query trajectory</span><span>Orange / green / purple: real Top-k candidates</span>{activeCandidate && <button onClick={() => setActiveCandidate(null)}>Show all candidates</button>}</div>
+          <div className="map-footer"><span>Blue: GPS query</span><span>Dark dashed: 100 m grid</span><span>Orange / green / purple: Top-k</span>{activeCandidate && <button onClick={() => setActiveCandidate(null)}>Show all candidates</button>}</div>
         </section>
 
-        <aside className="results-panel"><div className="panel-title"><h2>Retrieval results</h2><span>Top-{topK} of 7,000</span></div><p className="result-caption">Ranked by ascending <b>Chebyshev embedding distance</b></p><div className="result-list">{candidates.map((candidate) => <ResultCard key={candidate.id} candidate={candidate} selected={activeCandidate === candidate.id} onSelect={() => setActiveCandidate(candidate.id)} onWhy={() => setDrawerCandidate(candidate)} />)}</div><div className="results-footnote"><b>Ground-truth distance:</b> the displayed Hausdorff value comes from the author-compatible matrix computed on WGS84 coordinate sequences, so it is shown in coordinate units rather than falsely labelled metres.</div></aside>
+        <aside className="results-panel"><div className="panel-title"><h2>Retrieval results</h2><span>Top-{topK} of 7,000</span></div><p className="result-caption">Ranked by ascending <b>Chebyshev embedding distance</b></p><EfficiencyPanel caseData={caseData} benchmark={indexData.benchmark} /><div className="result-list">{candidates.map((candidate) => <ResultCard key={candidate.id} candidate={candidate} selected={activeCandidate === candidate.id} onSelect={() => setActiveCandidate(candidate.id)} onWhy={() => setDrawerCandidate(candidate)} />)}</div><div className="results-footnote"><b>Ground truth:</b> rank and distance come from the author-compatible Hausdorff matrix on WGS84 sequences. Values are coordinate units, not metres.</div></aside>
       </section>
 
       <section className="fixed-config" aria-label="Read-only experimental configuration"><Chip accent>⌖ Porto · 10,000</Chip><Chip>◈ Hausdorff supervision</Chip><Chip>⌁ Chebyshev retrieval</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip><span className="readonly">Read-only configuration</span></section>

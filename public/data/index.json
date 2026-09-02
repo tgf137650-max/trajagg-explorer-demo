@@ -64,5 +64,36 @@
       "durationMin": null,
       "pointCount": 22
     }
-  ]
+  ],
+  "benchmark": {
+    "status": "measured-real-artifact",
+    "protocol": {
+      "statement": "Ground-truth matrix lookup and browser rendering are excluded from online retrieval timing.",
+      "queryCount": 5,
+      "librarySize": 7000,
+      "embeddingDimension": 128,
+      "topK": 3,
+      "warmupRunsPerQuery": 20,
+      "measuredRunsPerQuery": 100,
+      "learnedMethod": "query preprocessing + TrajAgg GPU encoding + exhaustive Chebyshev scan/top-k over saved embeddings",
+      "directBaseline": "author traj-dist Hausdorff on WGS84 sequences + NumPy top-k sorting; one CPU process",
+      "cudaSynchronization": true,
+      "groundTruthMatrixLookupTimed": false,
+      "browserRenderingTimed": false
+    },
+    "environment": {
+      "hostname": "sigmaouc-Super-Server",
+      "python": "3.9.25",
+      "torch": "2.5.1+cu121",
+      "cuda": "12.1",
+      "gpu": "NVIDIA GeForce RTX 3090",
+      "gpuIndex": 0,
+      "cpu": "x86_64"
+    },
+    "summary": {
+      "trajaggMedianAcrossQueriesMs": 3.70602,
+      "directHausdorffMedianAcrossQueriesMs": 760.90495,
+      "medianSpeedupAcrossQueries": 205.315932
+    }
+  }
 }

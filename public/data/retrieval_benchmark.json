@@ -1,0 +1,363 @@
+{
+  "status": "measured-real-artifact",
+  "protocol": {
+    "statement": "Ground-truth matrix lookup and browser rendering are excluded from online retrieval timing.",
+    "queryCount": 5,
+    "librarySize": 7000,
+    "embeddingDimension": 128,
+    "topK": 3,
+    "warmupRunsPerQuery": 20,
+    "measuredRunsPerQuery": 100,
+    "learnedMethod": "query preprocessing + TrajAgg GPU encoding + exhaustive Chebyshev scan/top-k over saved embeddings",
+    "directBaseline": "author traj-dist Hausdorff on WGS84 sequences + NumPy top-k sorting; one CPU process",
+    "cudaSynchronization": true,
+    "groundTruthMatrixLookupTimed": false,
+    "browserRenderingTimed": false
+  },
+  "environment": {
+    "hostname": "sigmaouc-Super-Server",
+    "python": "3.9.25",
+    "torch": "2.5.1+cu121",
+    "cuda": "12.1",
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "gpuIndex": 0,
+    "cpu": "x86_64"
+  },
+  "summary": {
+    "trajaggMedianAcrossQueriesMs": 3.70602,
+    "directHausdorffMedianAcrossQueriesMs": 760.90495,
+    "medianSpeedupAcrossQueries": 205.315932
+  },
+  "queries": {
+    "7": {
+      "queryLocalIndex": 7,
+      "queryGlobalIndex": 3007,
+      "learned": {
+        "preprocess": {
+          "medianMs": 2.120438,
+          "meanMs": 2.135605,
+          "p95Ms": 2.261783,
+          "minMs": 1.945199,
+          "maxMs": 2.368691
+        },
+        "encode": {
+          "medianMs": 1.464724,
+          "meanMs": 1.457363,
+          "p95Ms": 1.500135,
+          "minMs": 1.39401,
+          "maxMs": 1.544478
+        },
+        "chebyshevDistanceAndTopK": {
+          "medianMs": 0.13619,
+          "meanMs": 0.137202,
+          "p95Ms": 0.145933,
+          "minMs": 0.129891,
+          "maxMs": 0.158497
+        },
+        "total": {
+          "medianMs": 3.70602,
+          "meanMs": 3.730169,
+          "p95Ms": 3.865789,
+          "minMs": 3.553789,
+          "maxMs": 3.922382
+        },
+        "topLocalIndices": [
+          5545,
+          4129,
+          5715
+        ],
+        "topGlobalIndices": [
+          8545,
+          7129,
+          8715
+        ],
+        "topDistances": [
+          0.02994932,
+          0.03038289,
+          0.033162
+        ],
+        "maxAbsErrorVsSavedEmbedding": 2.384185791015625e-07
+      },
+      "directHausdorff": {
+        "distanceComputationMs": 760.714088,
+        "topKSortMs": 0.190862,
+        "totalMs": 760.90495,
+        "topLocalIndices": [
+          5545,
+          4129,
+          156
+        ],
+        "topGlobalIndices": [
+          8545,
+          7129,
+          3156
+        ]
+      },
+      "speedupVsDirectHausdorff": 205.315932
+    },
+    "527": {
+      "queryLocalIndex": 527,
+      "queryGlobalIndex": 3527,
+      "learned": {
+        "preprocess": {
+          "medianMs": 6.102834,
+          "meanMs": 6.099327,
+          "p95Ms": 6.227546,
+          "minMs": 5.709481,
+          "maxMs": 6.283345
+        },
+        "encode": {
+          "medianMs": 1.441465,
+          "meanMs": 1.438666,
+          "p95Ms": 1.476386,
+          "minMs": 1.387774,
+          "maxMs": 1.494763
+        },
+        "chebyshevDistanceAndTopK": {
+          "medianMs": 0.136686,
+          "meanMs": 0.139146,
+          "p95Ms": 0.152942,
+          "minMs": 0.134431,
+          "maxMs": 0.171194
+        },
+        "total": {
+          "medianMs": 7.681951,
+          "meanMs": 7.677139,
+          "p95Ms": 7.809153,
+          "minMs": 7.232043,
+          "maxMs": 7.893998
+        },
+        "topLocalIndices": [
+          1163,
+          975,
+          699
+        ],
+        "topGlobalIndices": [
+          4163,
+          3975,
+          3699
+        ],
+        "topDistances": [
+          0.05362597,
+          0.05373035,
+          0.05685723
+        ],
+        "maxAbsErrorVsSavedEmbedding": 2.384185791015625e-07
+      },
+      "directHausdorff": {
+        "distanceComputationMs": 1960.888483,
+        "topKSortMs": 0.158891,
+        "totalMs": 1961.047374,
+        "topLocalIndices": [
+          3408,
+          1436,
+          2313
+        ],
+        "topGlobalIndices": [
+          6408,
+          4436,
+          5313
+        ]
+      },
+      "speedupVsDirectHausdorff": 255.27986
+    },
+    "1493": {
+      "queryLocalIndex": 1493,
+      "queryGlobalIndex": 4493,
+      "learned": {
+        "preprocess": {
+          "medianMs": 1.858506,
+          "meanMs": 1.855752,
+          "p95Ms": 1.92727,
+          "minMs": 1.705348,
+          "maxMs": 1.960091
+        },
+        "encode": {
+          "medianMs": 1.454621,
+          "meanMs": 1.450229,
+          "p95Ms": 1.503715,
+          "minMs": 1.343834,
+          "maxMs": 1.528072
+        },
+        "chebyshevDistanceAndTopK": {
+          "medianMs": 0.137394,
+          "meanMs": 0.13837,
+          "p95Ms": 0.147575,
+          "minMs": 0.13164,
+          "maxMs": 0.152647
+        },
+        "total": {
+          "medianMs": 3.452933,
+          "meanMs": 3.444351,
+          "p95Ms": 3.542438,
+          "minMs": 3.188817,
+          "maxMs": 3.594362
+        },
+        "topLocalIndices": [
+          4037,
+          1651,
+          4716
+        ],
+        "topGlobalIndices": [
+          7037,
+          4651,
+          7716
+        ],
+        "topDistances": [
+          0.01827085,
+          0.03278303,
+          0.0348146
+        ],
+        "maxAbsErrorVsSavedEmbedding": 2.384185791015625e-07
+      },
+      "directHausdorff": {
+        "distanceComputationMs": 707.070129,
+        "topKSortMs": 0.17116,
+        "totalMs": 707.241289,
+        "topLocalIndices": [
+          4037,
+          1651,
+          6723
+        ],
+        "topGlobalIndices": [
+          7037,
+          4651,
+          9723
+        ]
+      },
+      "speedupVsDirectHausdorff": 204.823316
+    },
+    "3271": {
+      "queryLocalIndex": 3271,
+      "queryGlobalIndex": 6271,
+      "learned": {
+        "preprocess": {
+          "medianMs": 3.692716,
+          "meanMs": 3.692069,
+          "p95Ms": 3.778048,
+          "minMs": 3.572144,
+          "maxMs": 3.85043
+        },
+        "encode": {
+          "medianMs": 1.485179,
+          "meanMs": 1.477728,
+          "p95Ms": 1.525907,
+          "minMs": 1.392965,
+          "maxMs": 1.560925
+        },
+        "chebyshevDistanceAndTopK": {
+          "medianMs": 0.139068,
+          "meanMs": 0.140161,
+          "p95Ms": 0.150561,
+          "minMs": 0.136309,
+          "maxMs": 0.16258
+        },
+        "total": {
+          "medianMs": 5.308378,
+          "meanMs": 5.309958,
+          "p95Ms": 5.395028,
+          "minMs": 5.159905,
+          "maxMs": 5.525257
+        },
+        "topLocalIndices": [
+          4094,
+          4846,
+          1751
+        ],
+        "topGlobalIndices": [
+          7094,
+          7846,
+          4751
+        ],
+        "topDistances": [
+          0.03353122,
+          0.0335978,
+          0.0425013
+        ],
+        "maxAbsErrorVsSavedEmbedding": 2.384185791015625e-07
+      },
+      "directHausdorff": {
+        "distanceComputationMs": 1209.694487,
+        "topKSortMs": 0.16316,
+        "totalMs": 1209.857647,
+        "topLocalIndices": [
+          4846,
+          4094,
+          4971
+        ],
+        "topGlobalIndices": [
+          7846,
+          7094,
+          7971
+        ]
+      },
+      "speedupVsDirectHausdorff": 227.914729
+    },
+    "5988": {
+      "queryLocalIndex": 5988,
+      "queryGlobalIndex": 8988,
+      "learned": {
+        "preprocess": {
+          "medianMs": 1.357302,
+          "meanMs": 1.356849,
+          "p95Ms": 1.411425,
+          "minMs": 1.311953,
+          "maxMs": 1.459605
+        },
+        "encode": {
+          "medianMs": 1.44691,
+          "meanMs": 1.448615,
+          "p95Ms": 1.49728,
+          "minMs": 1.406889,
+          "maxMs": 1.520173
+        },
+        "chebyshevDistanceAndTopK": {
+          "medianMs": 0.142566,
+          "meanMs": 0.143941,
+          "p95Ms": 0.153474,
+          "minMs": 0.140714,
+          "maxMs": 0.170138
+        },
+        "total": {
+          "medianMs": 2.943261,
+          "meanMs": 2.949405,
+          "p95Ms": 3.031825,
+          "minMs": 2.870219,
+          "maxMs": 3.074221
+        },
+        "topLocalIndices": [
+          3355,
+          1296,
+          6714
+        ],
+        "topGlobalIndices": [
+          6355,
+          4296,
+          9714
+        ],
+        "topDistances": [
+          0.02853582,
+          0.03466663,
+          0.04229046
+        ],
+        "maxAbsErrorVsSavedEmbedding": 2.384185791015625e-07
+      },
+      "directHausdorff": {
+        "distanceComputationMs": 564.617511,
+        "topKSortMs": 0.154814,
+        "totalMs": 564.772325,
+        "topLocalIndices": [
+          3355,
+          6714,
+          3680
+        ],
+        "topGlobalIndices": [
+          6355,
+          9714,
+          6680
+        ]
+      },
+      "speedupVsDirectHausdorff": 191.886593
+    }
+  }
+}

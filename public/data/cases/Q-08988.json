@@ -623,6 +623,9 @@
       "predictedSimilarity": 0.97186745,
       "hausdorffDistance": 0.0040236225,
       "hausdorffUnit": "WGS84 coordinate units",
+      "groundTruthRank": 1,
+      "inGroundTruthTop10": true,
+      "inGroundTruthTop50": true,
       "note": "Real candidate from the 7,000-trajectory test library. It is ranked by ascending Chebyshev distance between saved TrajAgg embeddings."
     },
     {
@@ -1576,6 +1579,9 @@
       "predictedSimilarity": 0.96592738,
       "hausdorffDistance": 0.0085962062,
       "hausdorffUnit": "WGS84 coordinate units",
+      "groundTruthRank": 11,
+      "inGroundTruthTop10": false,
+      "inGroundTruthTop50": true,
       "note": "Real candidate from the 7,000-trajectory test library. It is ranked by ascending Chebyshev distance between saved TrajAgg embeddings."
     },
     {
@@ -2029,6 +2035,9 @@
       "predictedSimilarity": 0.9585913,
       "hausdorffDistance": 0.0065701541,
       "hausdorffUnit": "WGS84 coordinate units",
+      "groundTruthRank": 2,
+      "inGroundTruthTop10": true,
+      "inGroundTruthTop50": true,
       "note": "Real candidate from the 7,000-trajectory test library. It is ranked by ascending Chebyshev distance between saved TrajAgg embeddings."
     }
   ],
@@ -2083,5 +2092,71 @@
     "selectionRule": "maximum validation HR@1 (author Trainer.run rule)",
     "groundTruth": "Hausdorff distance from the author-compatible 10,000x10,000 matrix",
     "retrievalDistance": "Chebyshev distance between saved embeddings"
+  },
+  "timing": {
+    "queryLocalIndex": 5988,
+    "queryGlobalIndex": 8988,
+    "learned": {
+      "preprocess": {
+        "medianMs": 1.357302,
+        "meanMs": 1.356849,
+        "p95Ms": 1.411425,
+        "minMs": 1.311953,
+        "maxMs": 1.459605
+      },
+      "encode": {
+        "medianMs": 1.44691,
+        "meanMs": 1.448615,
+        "p95Ms": 1.49728,
+        "minMs": 1.406889,
+        "maxMs": 1.520173
+      },
+      "chebyshevDistanceAndTopK": {
+        "medianMs": 0.142566,
+        "meanMs": 0.143941,
+        "p95Ms": 0.153474,
+        "minMs": 0.140714,
+        "maxMs": 0.170138
+      },
+      "total": {
+        "medianMs": 2.943261,
+        "meanMs": 2.949405,
+        "p95Ms": 3.031825,
+        "minMs": 2.870219,
+        "maxMs": 3.074221
+      },
+      "topLocalIndices": [
+        3355,
+        1296,
+        6714
+      ],
+      "topGlobalIndices": [
+        6355,
+        4296,
+        9714
+      ],
+      "topDistances": [
+        0.02853582,
+        0.03466663,
+        0.04229046
+      ],
+      "maxAbsErrorVsSavedEmbedding": 2.384185791015625e-07
+    },
+    "directHausdorff": {
+      "distanceComputationMs": 564.617511,
+      "topKSortMs": 0.154814,
+      "totalMs": 564.772325,
+      "topLocalIndices": [
+        3355,
+        6714,
+        3680
+      ],
+      "topGlobalIndices": [
+        6355,
+        9714,
+        6680
+      ]
+    },
+    "speedupVsDirectHausdorff": 191.886593
   }
 }

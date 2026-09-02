@@ -26,6 +26,8 @@ The strict reproduction Test results shown in the interface are:
 | HR@50 | 0.861586 |
 | R10@50 | 0.991329 |
 
+The interface also shows a measured per-query efficiency comparison for the five exported cases. On an RTX 3090, the median across queries was 3.706 ms for query preprocessing + TrajAgg encoding + exhaustive Chebyshev Top-k, versus 760.905 ms for direct author `traj-dist` Hausdorff computation and sorting on one CPU process: a median 205.32× speedup. Each query used 20 warmups and 100 measured runs with CUDA synchronization; browser rendering and ground-truth matrix lookup were excluded.
+
 ## Run locally
 
 Node.js 20.19 or newer is required.
@@ -47,8 +49,9 @@ npm run build
 1. Select one of five real Porto test trajectories.
 2. Compare the raw GPS/WGS84 route with its 100 m grid representation.
 3. Inspect the real Chebyshev Top-1 or Top-3 from the saved 7,000-trajectory embedding library.
-4. View exported Chebyshev distance, `exp(-distance)` similarity, and the corresponding Hausdorff ground-truth value.
-5. Follow the query → dual-scale encoder → embedding library → Top-k trace.
+4. Compare measured TrajAgg retrieval time with direct Hausdorff search for the selected query.
+5. View each candidate's Chebyshev distance, Hausdorff ground-truth distance, and ground-truth rank.
+6. Follow the query → dual-scale encoder → embedding library → Top-k trace.
 
 The central route canvas places the exported WGS84 coordinates on an interactive Porto street map. It uses OpenStreetMap cartography with visible attribution, and supports pan, zoom, route tooltips, candidate highlighting, and GPS/grid visibility controls. Timestamp and duration are marked unavailable because the author-compatible preprocessed 10,000-trajectory subset retains `trajlen`, `wgs_seq`, and `merc_seq`, but not those metadata fields.
 
@@ -59,6 +62,7 @@ Hausdorff values are not labelled as metres. The author preprocessing calculates
 ```text
 public/data/
 ├── index.json
+├── retrieval_benchmark.json
 └── cases/
     ├── Q-03007.json
     ├── Q-03527.json
@@ -67,7 +71,7 @@ public/data/
     └── Q-08988.json
 ```
 
-`index.json` records configuration, checkpoint selection, strict Test metrics, and query summaries. Each case contains the real query route, grid sequence, saved embedding preview, Top-3 candidates, Chebyshev scores, and Hausdorff ground truth.
+`index.json` records configuration, checkpoint selection, strict Test metrics, benchmark protocol, and query summaries. `retrieval_benchmark.json` preserves the complete per-query benchmark artifact. Each case contains the real query route, grid sequence, saved embedding preview, Top-3 candidates, Chebyshev scores, Hausdorff ground-truth ranks, and measured query timing.
 
 ## Offline artifact pipeline
 
