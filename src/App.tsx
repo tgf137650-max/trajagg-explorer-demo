@@ -7,12 +7,14 @@ type QuerySummary = {
   title: string;
   startTime: string;
   distanceKm: number;
-  durationMin: number;
+  durationMin: number | null;
+  pointCount: number;
 };
 
 type Candidate = {
   rank: number;
   id: string;
+  sourceIndex: number;
   color: string;
   gps: Point[];
   mercator: Point[];
@@ -20,13 +22,14 @@ type Candidate = {
   chebyshevDistance: number;
   predictedSimilarity: number;
   hausdorffDistance?: number;
+  hausdorffUnit?: string;
   note: string;
 };
 
 type CaseData = {
   id: string;
   metadata: QuerySummary & { area: string; description: string };
-  query: { gps: Point[]; mercator: Point[]; grid: Point[] };
+  query: { sourceIndex: number; gps: Point[]; mercator: Point[]; grid: Point[] };
   candidates: Candidate[];
   modelTrace: {
     gpsEncoder: string;
@@ -34,21 +37,77 @@ type CaseData = {
     mergedEmbedding: number[];
     queryEmbedding: number[];
     librarySize: number;
+    embeddingDimension: number;
   };
+  provenance: { kind: string; bestEpoch: number; selectionRule: string };
+};
+
+type Reproduction = {
+  bestEpoch: number;
+  selectionRule: string;
+  testMetrics: Record<string, number>;
+  artifactStatement: string;
 };
 
 type IndexData = {
-  prototypeNote: string;
+  status: string;
+  dataStatement: string;
   dataOrigin: string;
   config: Record<string, string>;
+  reproduction: Reproduction;
   queries: QuerySummary[];
 };
 
+type Bounds = { minX: number; maxX: number; minY: number; maxY: number };
+
 const DATA_ROOT = `${import.meta.env.BASE_URL}data/`;
 const RETRIEVAL_STEPS = ['Preprocessing', 'TrajAgg encoding', 'Chebyshev ranking', 'Results returned'];
+const EARTH_RADIUS = 6378137;
+const GRID_SIZE_METERS = 100;
+
+function lonLatToMercator([lon, lat]: Point): Point {
+  const longitude = (lon * Math.PI) / 180;
+  const latitude = (lat * Math.PI) / 180;
+  return [EARTH_RADIUS * longitude, EARTH_RADIUS * Math.log(Math.tan(Math.PI / 4 + latitude / 2))];
+}
+
+const PORTO_MERCATOR_MIN = lonLatToMercator([-8.7005, 41.1001]);
+
+function gridToMercator(points: Point[]): Point[] {
+  return points.map(([x, y]) => [
+    PORTO_MERCATOR_MIN[0] + (x + 0.5) * GRID_SIZE_METERS,
+    PORTO_MERCATOR_MIN[1] + (y + 0.5) * GRID_SIZE_METERS,
+  ]);
+}
+
+function getBounds(series: Point[][]): Bounds {
+  const points = series.flat();
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
+
+function projectPoints(points: Point[], bounds: Bounds, width: number, height: number, padding: number): Point[] {
+  const rangeX = Math.max(bounds.maxX - bounds.minX, 1);
+  const rangeY = Math.max(bounds.maxY - bounds.minY, 1);
+  const scale = Math.min((width - padding * 2) / rangeX, (height - padding * 2) / rangeY);
+  const renderedWidth = rangeX * scale;
+  const renderedHeight = rangeY * scale;
+  const offsetX = (width - renderedWidth) / 2;
+  const offsetY = (height - renderedHeight) / 2;
+  return points.map(([x, y]) => [offsetX + (x - bounds.minX) * scale, height - (offsetY + (y - bounds.minY) * scale)]);
+}
+
+function normaliseRoute(points: Point[], width = 100, height = 44, padding = 5): Point[] {
+  return projectPoints(points, getBounds([points]), width, height, padding);
+}
 
 function pointString(points: Point[]) {
   return points.map(([x, y]) => `${x},${y}`).join(' ');
+}
+
+function formatDistance(value: number) {
+  return value < 0.1 ? value.toFixed(6) : value.toFixed(4);
 }
 
 function wait(milliseconds: number) {
@@ -59,49 +118,21 @@ function Chip({ children, accent = false }: { children: React.ReactNode; accent?
   return <span className={`chip ${accent ? 'chip--accent' : ''}`}>{children}</span>;
 }
 
-function MiniRoute({
-  points,
-  color = '#1674e8',
-  grid = false,
-  label,
-}: {
-  points: Point[];
-  color?: string;
-  grid?: boolean;
-  label: string;
-}) {
+function MiniRoute({ points, color = '#1674e8', grid = false, label }: { points: Point[]; color?: string; grid?: boolean; label: string }) {
+  const rendered = normaliseRoute(points);
   return (
     <svg className="mini-route" viewBox="0 0 100 44" role="img" aria-label={label}>
       <path className="mini-route__base" d="M4 7 H96 M4 22 H96 M4 37 H96" />
       {grid && <path className="mini-route__grid" d="M14 3 V41 M29 3 V41 M44 3 V41 M59 3 V41 M74 3 V41 M89 3 V41" />}
-      <polyline
-        className="mini-route__line"
-        points={pointString(points)}
-        style={{ stroke: color }}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {grid
-        ? points.map(([x, y], index) => (
-            <rect key={`${x}-${y}-${index}`} x={x - 1.55} y={y - 1.55} width="3.1" height="3.1" rx="0.5" fill="#fff" stroke={color} strokeWidth="1" />
-          ))
-        : null}
-      <circle cx={points[0][0]} cy={points[0][1]} r="2.6" fill="#fff" stroke={color} strokeWidth="1.5" />
-      <circle cx={points.at(-1)![0]} cy={points.at(-1)![1]} r="2.6" fill="#fff" stroke={color} strokeWidth="1.5" />
+      <polyline className="mini-route__line" points={pointString(rendered)} style={{ stroke: color }} strokeLinecap="round" strokeLinejoin="round" />
+      {grid ? rendered.map(([x, y], index) => <rect key={`${x}-${y}-${index}`} x={x - 1.55} y={y - 1.55} width="3.1" height="3.1" rx="0.5" fill="#fff" stroke={color} strokeWidth="1" />) : null}
+      <circle cx={rendered[0][0]} cy={rendered[0][1]} r="2.6" fill="#fff" stroke={color} strokeWidth="1.5" />
+      <circle cx={rendered.at(-1)![0]} cy={rendered.at(-1)![1]} r="2.6" fill="#fff" stroke={color} strokeWidth="1.5" />
     </svg>
   );
 }
 
-function MapCanvas({
-  caseData,
-  topK,
-  activeCandidate,
-  gpsVisible,
-  gridVisible,
-  onCandidateClick,
-  onGpsToggle,
-  onGridToggle,
-}: {
+function MapCanvas({ caseData, topK, activeCandidate, gpsVisible, gridVisible, onCandidateClick, onGpsToggle, onGridToggle }: {
   caseData: CaseData;
   topK: number;
   activeCandidate: string | null;
@@ -112,215 +143,94 @@ function MapCanvas({
   onGridToggle: () => void;
 }) {
   const candidates = caseData.candidates.slice(0, topK);
+  const gridMercator = gridToMercator(caseData.query.grid);
+  const bounds = getBounds([caseData.query.mercator, gridMercator, ...caseData.candidates.map((candidate) => candidate.mercator)]);
+  const queryRoute = projectPoints(caseData.query.mercator, bounds, 100, 70, 5);
+  const gridRoute = projectPoints(gridMercator, bounds, 100, 70, 5);
   return (
     <div className="map-canvas" aria-label="Porto trajectory comparison">
-      <div className="map-water map-water--one" />
-      <div className="map-water map-water--two" />
-      <div className="map-road map-road--one" />
-      <div className="map-road map-road--two" />
-      <div className="map-label">Porto · illustrative map</div>
+      <div className="map-label">Porto · normalized projected-coordinate route view</div>
       <div className="map-legend" aria-label="Route colour legend">
         <span><i className="legend-line legend-line--query" />Query</span>
-        {candidates.map((candidate) => (
-          <span key={candidate.id}><i className="legend-line" style={{ background: candidate.color }} />Top-{candidate.rank}</span>
-        ))}
+        {candidates.map((candidate) => <span key={candidate.id}><i className="legend-line" style={{ background: candidate.color }} />Top-{candidate.rank}</span>)}
       </div>
       <div className="map-toggle-group">
         <label><input type="checkbox" checked={gpsVisible} onChange={onGpsToggle} /> GPS</label>
         <label><input type="checkbox" checked={gridVisible} onChange={onGridToggle} /> Grid</label>
       </div>
       <svg className="trajectory-map" viewBox="0 0 100 70" role="img" aria-label="Query and candidate trajectories">
-        <defs>
-          <filter id="routeGlow" x="-15%" y="-30%" width="130%" height="160%">
-            <feGaussianBlur stdDeviation="0.9" result="blur" />
-            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
-        {gpsVisible &&
-          candidates.map((candidate) => {
-            const active = !activeCandidate || activeCandidate === candidate.id;
-            return (
-              <g
-                key={candidate.id}
-                className="candidate-route"
-                opacity={active ? 1 : 0.12}
-                onClick={() => onCandidateClick(candidate.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => event.key === 'Enter' && onCandidateClick(candidate.id)}
-                aria-label={`Highlight candidate trajectory ${candidate.id}`}
-              >
-                <polyline
-                  points={pointString(candidate.gps)}
-                  fill="none"
-                  stroke={candidate.color}
-                  strokeWidth={activeCandidate === candidate.id ? '2.25' : '1.65'}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  filter="url(#routeGlow)"
-                />
-                <circle cx={candidate.gps.at(-1)![0]} cy={candidate.gps.at(-1)![1]} r="1.35" fill="#fff" stroke={candidate.color} strokeWidth="0.8" />
-              </g>
-            );
-          })}
-        {gridVisible && (
-          <polyline
-            points={pointString(caseData.query.grid)}
-            fill="none"
-            stroke="#1674e8"
-            strokeWidth="1.1"
-            strokeDasharray="1.9 1.5"
-            opacity="0.62"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        )}
-        {gpsVisible && (
-          <g>
-            <polyline
-              points={pointString(caseData.query.gps)}
-              fill="none"
-              stroke="#1674e8"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              filter="url(#routeGlow)"
-            />
-            <circle cx={caseData.query.gps[0][0]} cy={caseData.query.gps[0][1]} r="1.65" fill="#fff" stroke="#1674e8" strokeWidth="1" />
-            <circle cx={caseData.query.gps.at(-1)![0]} cy={caseData.query.gps.at(-1)![1]} r="1.65" fill="#fff" stroke="#1674e8" strokeWidth="1" />
-          </g>
-        )}
+        <defs><filter id="routeGlow" x="-15%" y="-30%" width="130%" height="160%"><feGaussianBlur stdDeviation="0.9" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter></defs>
+        {gpsVisible && candidates.map((candidate) => {
+          const active = !activeCandidate || activeCandidate === candidate.id;
+          const route = projectPoints(candidate.mercator, bounds, 100, 70, 5);
+          return (
+            <g key={candidate.id} className="candidate-route" opacity={active ? 1 : 0.12} onClick={() => onCandidateClick(candidate.id)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onCandidateClick(candidate.id)} aria-label={`Highlight candidate trajectory ${candidate.id}`}>
+              <polyline points={pointString(route)} fill="none" stroke={candidate.color} strokeWidth={activeCandidate === candidate.id ? '2.25' : '1.65'} strokeLinecap="round" strokeLinejoin="round" filter="url(#routeGlow)" />
+              <circle cx={route.at(-1)![0]} cy={route.at(-1)![1]} r="1.35" fill="#fff" stroke={candidate.color} strokeWidth="0.8" />
+            </g>
+          );
+        })}
+        {gridVisible && <polyline points={pointString(gridRoute)} fill="none" stroke="#1674e8" strokeWidth="1.1" strokeDasharray="1.9 1.5" opacity="0.72" strokeLinecap="round" strokeLinejoin="round" />}
+        {gpsVisible && <g><polyline points={pointString(queryRoute)} fill="none" stroke="#1674e8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" filter="url(#routeGlow)" /><circle cx={queryRoute[0][0]} cy={queryRoute[0][1]} r="1.65" fill="#fff" stroke="#1674e8" strokeWidth="1" /><circle cx={queryRoute.at(-1)![0]} cy={queryRoute.at(-1)![1]} r="1.65" fill="#fff" stroke="#1674e8" strokeWidth="1" /></g>}
       </svg>
     </div>
   );
 }
 
 function EmbeddingDots({ values, tone = 'purple' }: { values: number[]; tone?: 'purple' | 'blue' | 'green' }) {
-  return (
-    <span className={`embedding-dots embedding-dots--${tone}`} aria-label="Embedding vector preview">
-      {values.slice(0, 6).map((value, index) => <i key={index} style={{ opacity: 0.42 + Math.min(value, 0.58) }} />)}
-      <b>…</b>
-    </span>
-  );
+  return <span className={`embedding-dots embedding-dots--${tone}`} aria-label="Actual saved embedding vector preview">{values.slice(0, 6).map((value, index) => <i key={index} style={{ opacity: 0.35 + Math.min(Math.abs(value), 1) * 0.65 }} />)}<b>…</b></span>;
 }
 
 function ModelTrace({ caseData, expanded, onToggle, topK }: { caseData: CaseData; expanded: boolean; onToggle: () => void; topK: number }) {
   return (
     <section className={`trace-panel ${expanded ? 'trace-panel--open' : ''}`} aria-label="Model Trace">
-      <button className="trace-heading" onClick={onToggle} aria-expanded={expanded}>
-        <span className="chevron">{expanded ? '⌄' : '›'}</span>
-        <span>Model Trace · Explain this retrieval</span>
-        <small>Offline inference trace for this query</small>
-      </button>
-      {expanded && (
-        <div className="trace-flow">
-          <article className="trace-step trace-step--query">
-            <div className="step-title"><b>1</b><span>Query &amp; grid</span></div>
-            <p>Dual-scale inputs for the same query trajectory</p>
-            <div className="trace-route-pair">
-              <div><small>GPS</small><MiniRoute points={caseData.query.gps} label="Query GPS trajectory preview" /></div>
-              <div><small>100 m grid</small><MiniRoute points={caseData.query.grid} grid label="Query grid trajectory preview" /></div>
-            </div>
-          </article>
-          <div className="flow-arrow" aria-hidden="true">→</div>
-          <article className="trace-step trace-step--encoder">
-            <div className="step-title"><b>2</b><span>Dual-scale encoder</span></div>
-            <p>Dual-scale aggregation yields a trajectory representation</p>
-            <div className="encoder-flow">
-              <div className="encoder-input">
-                <small>GPS encoder · global</small>
-                <EmbeddingDots values={[0.7, 0.41, 0.65, 0.48, 0.74, 0.36]} tone="blue" />
-                <small>Grid encoder · local</small>
-                <EmbeddingDots values={[0.58, 0.36, 0.7, 0.61, 0.46, 0.67]} tone="green" />
-              </div>
-              <span className="merge-arrow">⤳</span>
-              <div className="merged-vector">
-                <small>Merged embedding</small>
-                <EmbeddingDots values={caseData.modelTrace.mergedEmbedding} />
-              </div>
-            </div>
-          </article>
-          <div className="flow-arrow" aria-hidden="true">→</div>
-          <article className="trace-step trace-step--retrieve">
-            <div className="step-title"><b>3</b><span>Chebyshev Top-k</span></div>
-            <p>Compare the query vector with the library and rank by distance</p>
-            <div className="retrieval-flow">
-              <div><small>Query embedding</small><EmbeddingDots values={caseData.modelTrace.queryEmbedding} /></div>
-              <span className="tiny-arrow">→</span>
-              <div className="library-vector"><small>Trajectory embedding library</small><span className="library-grid">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</span></div>
-              <span className="tiny-arrow">→</span>
-              <div className="rank-bars"><small>Top-{topK}</small>{caseData.candidates.slice(0, topK).map((candidate) => <span key={candidate.id}><b>{candidate.rank}</b><i style={{ background: candidate.color }} /></span>)}</div>
-            </div>
-          </article>
-        </div>
-      )}
-      {expanded && <p className="trace-disclaimer">This panel explains the inputs, dual-scale representation, and vector ranking. Hausdorff distance is used for ground-truth supervision and evaluation, not computed directly for online ranking.</p>}
+      <button className="trace-heading" onClick={onToggle} aria-expanded={expanded}><span className="chevron">{expanded ? '⌄' : '›'}</span><span>Model Trace · Explain this retrieval</span><small>Real offline inference artifact</small></button>
+      {expanded && <div className="trace-flow">
+        <article className="trace-step trace-step--query"><div className="step-title"><b>1</b><span>Query &amp; grid</span></div><p>Two representations exported for the same real query trajectory</p><div className="trace-route-pair"><div><small>GPS · {caseData.metadata.pointCount} points</small><MiniRoute points={caseData.query.gps} label="Query GPS trajectory preview" /></div><div><small>100 m grid · {caseData.query.grid.length} cells</small><MiniRoute points={caseData.query.grid} grid label="Query grid trajectory preview" /></div></div></article>
+        <div className="flow-arrow" aria-hidden="true">→</div>
+        <article className="trace-step trace-step--encoder"><div className="step-title"><b>2</b><span>Dual-scale encoder</span></div><p>The author model aggregates Mercator and grid streams into one vector</p><div className="encoder-flow"><div className="encoder-input"><small>Mercator stream</small><span className="encoder-chip">{caseData.metadata.pointCount} coordinate points</span><small>Grid stream</small><span className="encoder-chip encoder-chip--green">{caseData.query.grid.length} grid cells</span></div><span className="merge-arrow">⤳</span><div className="merged-vector"><small>Saved {caseData.modelTrace.embeddingDimension}-D embedding</small><EmbeddingDots values={caseData.modelTrace.mergedEmbedding} /></div></div></article>
+        <div className="flow-arrow" aria-hidden="true">→</div>
+        <article className="trace-step trace-step--retrieve"><div className="step-title"><b>3</b><span>Chebyshev Top-k</span></div><p>Compare the saved query vector with {caseData.modelTrace.librarySize.toLocaleString()} test-library vectors</p><div className="retrieval-flow"><div><small>Actual query embedding</small><EmbeddingDots values={caseData.modelTrace.queryEmbedding} /></div><span className="tiny-arrow">→</span><div className="library-vector"><small>Saved embedding library</small><span className="library-grid">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</span></div><span className="tiny-arrow">→</span><div className="rank-bars"><small>Top-{topK}</small>{caseData.candidates.slice(0, topK).map((candidate) => <span key={candidate.id}><b>{candidate.rank}</b><i style={{ background: candidate.color }} /></span>)}</div></div></article>
+      </div>}
+      {expanded && <p className="trace-disclaimer">This panel uses real exported trajectories, rankings, and final embeddings. Branch-specific intermediate embeddings are not fabricated. Hausdorff is the offline supervision/evaluation ground truth; online ranking uses Chebyshev embedding distance.</p>}
     </section>
   );
 }
 
-function ResultCard({
-  candidate,
-  selected,
-  onSelect,
-  onWhy,
-}: {
-  candidate: Candidate;
-  selected: boolean;
-  onSelect: () => void;
-  onWhy: () => void;
-}) {
+function ResultCard({ candidate, selected, onSelect, onWhy }: { candidate: Candidate; selected: boolean; onSelect: () => void; onWhy: () => void }) {
   return (
     <article className={`result-card ${selected ? 'result-card--selected' : ''}`} style={{ '--accent': candidate.color } as CSSProperties}>
-      <button className="result-main" onClick={onSelect} aria-label={`View candidate trajectory ${candidate.id}`}>
-        <span className="rank-dot">{candidate.rank}</span>
-        <div className="result-title"><strong>{candidate.id}</strong><i /></div>
-        <dl>
-          <div><dt>Chebyshev embedding distance <em>example</em></dt><dd>{candidate.chebyshevDistance.toFixed(1)}</dd></div>
-          <div><dt>Predicted similarity <em>example</em></dt><dd>{candidate.predictedSimilarity.toFixed(3)}</dd></div>
-          {candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance <em>example</em></dt><dd>{candidate.hausdorffDistance.toFixed(1)} m</dd></div>}
-        </dl>
-      </button>
+      <button className="result-main" onClick={onSelect} aria-label={`View candidate trajectory ${candidate.id}`}><span className="rank-dot">{candidate.rank}</span><div className="result-title"><strong>{candidate.id}</strong><i /></div><dl><div><dt>Chebyshev embedding distance <em>exported</em></dt><dd>{formatDistance(candidate.chebyshevDistance)}</dd></div><div><dt>Predicted similarity <em>exp(−distance)</em></dt><dd>{candidate.predictedSimilarity.toFixed(6)}</dd></div>{candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance <em>WGS84 space</em></dt><dd>{formatDistance(candidate.hausdorffDistance)}</dd></div>}</dl></button>
       <button className="why-button" onClick={onWhy}>Why this candidate? <span>›</span></button>
     </article>
   );
 }
 
 function WhyDrawer({ caseData, candidate, onClose }: { caseData: CaseData; candidate: Candidate; onClose: () => void }) {
+  const bounds = getBounds([caseData.query.mercator, candidate.mercator]);
+  const queryRoute = projectPoints(caseData.query.mercator, bounds, 100, 70, 6);
+  const candidateRoute = projectPoints(candidate.mercator, bounds, 100, 70, 6);
   return (
-    <div className="drawer-backdrop" role="presentation" onMouseDown={onClose}>
-      <aside className="why-drawer" role="dialog" aria-modal="true" aria-label="Candidate explanation" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="drawer-head">
-          <div><span className="eyebrow">RETRIEVAL EXPLANATION</span><h2>Why this candidate?</h2></div>
-          <button onClick={onClose} aria-label="Close candidate explanation">×</button>
-        </div>
-        <div className="drawer-map">
-          <svg viewBox="0 0 100 70" role="img" aria-label="Query and candidate trajectory overlay">
-            <polyline points={pointString(candidate.gps)} fill="none" stroke={candidate.color} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
-            <polyline points={pointString(caseData.query.gps)} fill="none" stroke="#1674e8" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="drawer-legend"><i className="legend-line legend-line--query" /> Query <i className="legend-line" style={{ background: candidate.color }} /> Candidate</span>
-        </div>
-        <h3>Rank {candidate.rank} · {candidate.id}</h3>
-        <dl className="drawer-metrics">
-          <div><dt>Chebyshev embedding distance</dt><dd>{candidate.chebyshevDistance.toFixed(1)} <em>example</em></dd></div>
-          <div><dt>Predicted similarity</dt><dd>{candidate.predictedSimilarity.toFixed(3)} <em>example</em></dd></div>
-          {candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance</dt><dd>{candidate.hausdorffDistance.toFixed(1)} m <em>example</em></dd></div>}
-        </dl>
-        <div className="explanation-note">
-          <b>How to interpret this</b>
-          <p>This is an embedding-ranking result: the candidate has a smaller Chebyshev vector distance to the query and therefore enters Top-k. Hausdorff distance is used for training supervision and evaluation, not as the direct online ranking distance.</p>
-        </div>
-        <p className="candidate-note">{candidate.note}</p>
-      </aside>
-    </div>
+    <div className="drawer-backdrop" role="presentation" onMouseDown={onClose}><aside className="why-drawer" role="dialog" aria-modal="true" aria-label="Candidate explanation" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="drawer-head"><div><span className="eyebrow">REAL RETRIEVAL EXPLANATION</span><h2>Why this candidate?</h2></div><button onClick={onClose} aria-label="Close candidate explanation">×</button></div>
+      <div className="drawer-map"><svg viewBox="0 0 100 70" role="img" aria-label="Query and candidate trajectory overlay"><polyline points={pointString(candidateRoute)} fill="none" stroke={candidate.color} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" /><polyline points={pointString(queryRoute)} fill="none" stroke="#1674e8" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" /></svg><span className="drawer-legend"><i className="legend-line legend-line--query" /> Query <i className="legend-line" style={{ background: candidate.color }} /> Candidate</span></div>
+      <h3>Rank {candidate.rank} · {candidate.id}</h3><dl className="drawer-metrics"><div><dt>Chebyshev embedding distance</dt><dd>{formatDistance(candidate.chebyshevDistance)} <em>exported</em></dd></div><div><dt>Predicted similarity</dt><dd>{candidate.predictedSimilarity.toFixed(6)} <em>exp(−d)</em></dd></div>{candidate.hausdorffDistance !== undefined && <div><dt>Hausdorff ground-truth distance</dt><dd>{formatDistance(candidate.hausdorffDistance)} <em>{candidate.hausdorffUnit ?? 'WGS84 units'}</em></dd></div>}</dl>
+      <div className="explanation-note"><b>How to interpret this</b><p>This real test-library candidate has one of the smallest Chebyshev distances to the query embedding. Hausdorff is retained as offline supervision/evaluation ground truth and is not recomputed for online ranking.</p></div><p className="candidate-note">{candidate.note}</p>
+    </aside></div>
+  );
+}
+
+function ReproductionStrip({ reproduction }: { reproduction: Reproduction }) {
+  const metrics = reproduction.testMetrics;
+  return (
+    <section className="metrics-strip" aria-label="Strict Porto reproduction result"><div className="metrics-heading"><span>Strict Porto reproduction</span><b>Best checkpoint · Epoch {reproduction.bestEpoch}</b></div>{['1', '5', '10', '20', '50'].map((key) => <span className="metric-item" key={key}><small>HR@{key}</small><b>{metrics[key].toFixed(6)}</b></span>)}<span className="metric-item"><small>R10@50</small><b>{metrics['R10@50'].toFixed(6)}</b></span></section>
   );
 }
 
 export default function App() {
   const [indexData, setIndexData] = useState<IndexData | null>(null);
-  const [caseData, setCaseData] = useState<CaseData | null>(null);
-  const [selectedId, setSelectedId] = useState('Q-0001');
+  const [caseMap, setCaseMap] = useState<Record<string, CaseData>>({});
+  const [selectedId, setSelectedId] = useState('');
   const [topK, setTopK] = useState(3);
   const [activeCandidate, setActiveCandidate] = useState<string | null>(null);
   const [drawerCandidate, setDrawerCandidate] = useState<Candidate | null>(null);
@@ -332,26 +242,36 @@ export default function App() {
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    fetch(`${DATA_ROOT}index.json`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to read index.json')))
-      .then((data: IndexData) => setIndexData(data))
-      .catch(() => setLoadError('Unable to read example data. Please confirm that public/data/ remains in the project.'));
+    let active = true;
+    async function loadData() {
+      try {
+        const indexResponse = await fetch(`${DATA_ROOT}index.json`);
+        if (!indexResponse.ok) throw new Error('Unable to read index.json');
+        const index = await indexResponse.json() as IndexData;
+        const cases = await Promise.all(index.queries.map(async (query) => {
+          const response = await fetch(`${DATA_ROOT}cases/${query.id}.json`);
+          if (!response.ok) throw new Error(`Unable to read ${query.id}.json`);
+          return response.json() as Promise<CaseData>;
+        }));
+        if (!active) return;
+        setIndexData(index);
+        setCaseMap(Object.fromEntries(cases.map((item) => [item.id, item])));
+        setSelectedId(index.queries[0]?.id ?? '');
+      } catch {
+        if (active) setLoadError('Unable to read the exported Porto retrieval data.');
+      }
+    }
+    void loadData();
+    return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    setCaseData(null);
-    setActiveCandidate(null);
-    setDrawerCandidate(null);
-    fetch(`${DATA_ROOT}cases/${selectedId}.json`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to read case data')))
-      .then((data: CaseData) => setCaseData(data))
-      .catch(() => setLoadError(`Unable to read the example case for ${selectedId}.`));
-  }, [selectedId]);
+  useEffect(() => { setActiveCandidate(null); setDrawerCandidate(null); }, [selectedId]);
 
+  const caseData = selectedId ? caseMap[selectedId] : undefined;
   const visibleQueries = useMemo(() => {
     if (!indexData) return [];
     const keyword = search.trim().toLowerCase();
-    return !keyword ? indexData.queries : indexData.queries.filter((item) => `${item.id} ${item.title} ${item.startTime}`.toLowerCase().includes(keyword));
+    return !keyword ? indexData.queries : indexData.queries.filter((item) => `${item.id} ${item.title}`.toLowerCase().includes(keyword));
   }, [indexData, search]);
 
   async function retrieve() {
@@ -365,75 +285,40 @@ export default function App() {
   }
 
   if (loadError) return <main className="loading-state"><h1>TrajAgg Explorer</h1><p>{loadError}</p></main>;
-  if (!indexData || !caseData) return <main className="loading-state"><span className="loading-orb" /><h1>Loading TrajAgg Explorer</h1><p>Reading local static example data…</p></main>;
+  if (!indexData || !caseData) return <main className="loading-state"><span className="loading-orb" /><h1>Loading TrajAgg Explorer</h1><p>Reading real exported Porto cases…</p></main>;
 
   const candidates = caseData.candidates.slice(0, topK);
   const retrieving = retrievalStep !== null;
-
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <h1>TrajAgg Explorer</h1>
-          <span className="prototype-badge">Prototype · example data</span>
-        </div>
-        <div className="top-config" aria-label="Fixed configuration">
-          <Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip>
-        </div>
-      </header>
-
-      <div className="academic-notice">
-        <b>Academic demo</b><span>{indexData.prototypeNote}</span><span className="notice-divider" /><span>Fixed configuration for retrieval-flow demonstration only; example values are not paper or local reproduction results.</span>
-      </div>
+      <header className="topbar"><div className="brand-block"><h1>TrajAgg Explorer</h1><span className="data-status-badge">Real Porto export</span></div><div className="top-config" aria-label="Fixed configuration"><Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip></div></header>
+      <div className="academic-notice"><b>Academic demo</b><span>{indexData.dataStatement}</span><span className="notice-divider" /><span>Fixed configuration · best validation-HR@1 checkpoint at Epoch {indexData.reproduction.bestEpoch}</span></div>
 
       <section className="workspace">
         <aside className="query-panel">
-          <div className="panel-title"><h2>Query trajectories</h2><span>Select a query</span></div>
-          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search trajectory ID or time…" aria-label="Search query trajectories" /></label>
-          <div className="query-list">
-            {visibleQueries.map((query) => (
-              <button key={query.id} className={`query-item ${query.id === selectedId ? 'query-item--active' : ''}`} onClick={() => setSelectedId(query.id)}>
-                <MiniRoute points={query.id === caseData.id ? caseData.query.gps : [[8, 28], [25, 14], [45, 22], [68, 15], [87, 29]]} color={query.id === selectedId ? '#1674e8' : '#b5bdca'} label={`${query.id} route thumbnail`} />
-                <span className="query-info"><b>{query.id}</b><small>{query.startTime}</small><small>{query.distanceKm.toFixed(1)} km · {query.durationMin} min</small></span><i>›</i>
-              </button>
-            ))}
-          </div>
-          <div className="preview-stack">
-            <div><div className="preview-label">GPS trajectory <button onClick={() => setGpsVisible((value) => !value)}>{gpsVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.gps} label="GPS trajectory preview" /></div>
-            <div><div className="preview-label">100 m grid trajectory <button onClick={() => setGridVisible((value) => !value)}>{gridVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.grid} grid label="Grid trajectory preview" /></div>
-          </div>
-          <div className="retrieval-controls">
-            <div className="topk-toggle" role="group" aria-label="Select result count"><button className={topK === 1 ? 'is-active' : ''} onClick={() => setTopK(1)}>Top-1</button><button className={topK === 3 ? 'is-active' : ''} onClick={() => setTopK(3)}>Top-3</button></div>
-            <button className="retrieve-button" onClick={retrieve} disabled={retrieving}>{retrieving ? <><span className="spinner" />{RETRIEVAL_STEPS[retrievalStep]}</> : <>⌕ Retrieve Top-{topK}</>}</button>
-          </div>
+          <div className="panel-title"><h2>Query trajectories</h2><span>Real Porto test split</span></div>
+          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search trajectory ID…" aria-label="Search query trajectories" /></label>
+          <div className="query-list">{visibleQueries.map((query) => {
+            const itemCase = caseMap[query.id];
+            return <button key={query.id} className={`query-item ${query.id === selectedId ? 'query-item--active' : ''}`} onClick={() => setSelectedId(query.id)}><MiniRoute points={itemCase.query.gps} color={query.id === selectedId ? '#1674e8' : '#9ba9bd'} label={`${query.id} real route thumbnail`} /><span className="query-info"><b>{query.id}</b><small>{query.distanceKm.toFixed(2)} km · {query.pointCount} GPS points</small><small>Timestamp unavailable</small></span><i>›</i></button>;
+          })}</div>
+          <div className="preview-stack"><div><div className="preview-label">GPS trajectory <button onClick={() => setGpsVisible((value) => !value)}>{gpsVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.gps} label="GPS trajectory preview" /></div><div><div className="preview-label">100 m grid trajectory <button onClick={() => setGridVisible((value) => !value)}>{gridVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.grid} grid label="Grid trajectory preview" /></div></div>
+          <div className="retrieval-controls"><div className="topk-toggle" role="group" aria-label="Select result count"><button className={topK === 1 ? 'is-active' : ''} onClick={() => setTopK(1)}>Top-1</button><button className={topK === 3 ? 'is-active' : ''} onClick={() => setTopK(3)}>Top-3</button></div><button className="retrieve-button" onClick={retrieve} disabled={retrieving}>{retrieving ? <><span className="spinner" />{RETRIEVAL_STEPS[retrievalStep]}</> : <>⌕ Retrieve Top-{topK}</>}</button></div>
         </aside>
 
         <section className="map-panel">
           <MapCanvas caseData={caseData} topK={topK} activeCandidate={activeCandidate} gpsVisible={gpsVisible} gridVisible={gridVisible} onCandidateClick={setActiveCandidate} onGpsToggle={() => setGpsVisible((value) => !value)} onGridToggle={() => setGridVisible((value) => !value)} />
-          {retrieving && <div className="retrieval-toast" role="status"><span className="spinner" /><div><b>{RETRIEVAL_STEPS[retrievalStep]}</b><p>{retrievalStep === 0 ? 'Mercator, grid mapping, and padding' : retrievalStep === 1 ? 'Generate a query embedding with the dual-scale TrajAgg encoder' : retrievalStep === 2 ? 'Compute Chebyshev distance against the vector library' : 'Display example Top-k candidate trajectories'}</p></div><i>{retrievalStep + 1}/4</i></div>}
-          <div className="map-footer"><span>Blue: query trajectory</span><span>Orange / green / purple: Top-k candidates</span>{activeCandidate && <button onClick={() => setActiveCandidate(null)}>Show all candidates</button>}</div>
+          {retrieving && <div className="retrieval-toast" role="status"><span className="spinner" /><div><b>{RETRIEVAL_STEPS[retrievalStep]}</b><p>{retrievalStep === 0 ? 'Mercator, 100 m grid mapping, and padding' : retrievalStep === 1 ? 'Read the saved 128-D query embedding from the best checkpoint artifact' : retrievalStep === 2 ? 'Rank the 7,000-trajectory test library by Chebyshev distance' : 'Display the real exported Top-k candidates'}</p></div><i>{retrievalStep + 1}/4</i></div>}
+          <div className="map-footer"><span>Blue: real query trajectory</span><span>Orange / green / purple: real Top-k candidates</span>{activeCandidate && <button onClick={() => setActiveCandidate(null)}>Show all candidates</button>}</div>
         </section>
 
-        <aside className="results-panel">
-          <div className="panel-title"><h2>Retrieval results</h2><span>Top-{topK} candidates</span></div>
-          <p className="result-caption">Ranked by ascending <b>Chebyshev embedding distance</b></p>
-          <div className="result-list">
-            {candidates.map((candidate) => <ResultCard key={candidate.id} candidate={candidate} selected={activeCandidate === candidate.id} onSelect={() => setActiveCandidate(candidate.id)} onWhy={() => setDrawerCandidate(candidate)} />)}
-          </div>
-          <div className="results-footnote"><b>About ground-truth distance:</b> Hausdorff is the real trajectory distance used for supervision and evaluation. Every number here is an example and must not be reported as a reproduction result.</div>
-        </aside>
+        <aside className="results-panel"><div className="panel-title"><h2>Retrieval results</h2><span>Top-{topK} of 7,000</span></div><p className="result-caption">Ranked by ascending <b>Chebyshev embedding distance</b></p><div className="result-list">{candidates.map((candidate) => <ResultCard key={candidate.id} candidate={candidate} selected={activeCandidate === candidate.id} onSelect={() => setActiveCandidate(candidate.id)} onWhy={() => setDrawerCandidate(candidate)} />)}</div><div className="results-footnote"><b>Ground-truth distance:</b> the displayed Hausdorff value comes from the author-compatible matrix computed on WGS84 coordinate sequences, so it is shown in coordinate units rather than falsely labelled metres.</div></aside>
       </section>
 
-      <section className="fixed-config" aria-label="Read-only experimental configuration">
-        <Chip accent>⌖ Porto</Chip><Chip>◈ Hausdorff supervision</Chip><Chip>⌁ Chebyshev retrieval</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip><span className="readonly">Read-only configuration</span>
-      </section>
-
+      <section className="fixed-config" aria-label="Read-only experimental configuration"><Chip accent>⌖ Porto · 10,000</Chip><Chip>◈ Hausdorff supervision</Chip><Chip>⌁ Chebyshev retrieval</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip><span className="readonly">Read-only configuration</span></section>
+      <ReproductionStrip reproduction={indexData.reproduction} />
       <ModelTrace caseData={caseData} expanded={traceOpen} onToggle={() => setTraceOpen((value) => !value)} topK={topK} />
-
-      <footer className="academic-footer">
-        <span>Evaluation metrics after real-data export: <b>HR@1 · HR@5 · HR@10 · HR@20 · HR@50 · R10@50</b></span>
-        <span>{indexData.dataOrigin}</span>
-      </footer>
+      <footer className="academic-footer"><span>Real exported cases · <b>7,000-trajectory test embedding library</b></span><span>{indexData.dataOrigin}</span></footer>
       {drawerCandidate && <WhyDrawer caseData={caseData} candidate={drawerCandidate} onClose={() => setDrawerCandidate(null)} />}
     </main>
   );
