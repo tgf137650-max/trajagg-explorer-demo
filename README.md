@@ -50,7 +50,7 @@ npm run build
 4. View exported Chebyshev distance, `exp(-distance)` similarity, and the corresponding Hausdorff ground-truth value.
 5. Follow the query → dual-scale encoder → embedding library → Top-k trace.
 
-The route canvas is a coordinate-normalized comparison view, not a street basemap. Timestamp and duration are marked unavailable because the author-compatible preprocessed 10,000-trajectory subset retains `trajlen`, `wgs_seq`, and `merc_seq`, but not those metadata fields.
+The central route canvas places the exported WGS84 coordinates on an interactive Porto street map. It uses OpenStreetMap cartography with visible attribution, and supports pan, zoom, route tooltips, candidate highlighting, and GPS/grid visibility controls. Timestamp and duration are marked unavailable because the author-compatible preprocessed 10,000-trajectory subset retains `trajlen`, `wgs_seq`, and `merc_seq`, but not those metadata fields.
 
 Hausdorff values are not labelled as metres. The author preprocessing calculates them from WGS84 coordinate sequences, so the demo reports them in WGS84 coordinate space.
 

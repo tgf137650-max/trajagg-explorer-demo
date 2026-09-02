@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, ZoomControl } from 'react-leaflet';
+import { latLngBounds, type LatLngBounds } from 'leaflet';
 
 type Point = [number, number];
 
@@ -80,6 +82,17 @@ function gridToMercator(points: Point[]): Point[] {
   ]);
 }
 
+function mercatorToLonLat([x, y]: Point): Point {
+  return [
+    (x / EARTH_RADIUS) * (180 / Math.PI),
+    (2 * Math.atan(Math.exp(y / EARTH_RADIUS)) - Math.PI / 2) * (180 / Math.PI),
+  ];
+}
+
+function toLeafletPositions(points: Point[]): Point[] {
+  return points.map(([longitude, latitude]) => [latitude, longitude]);
+}
+
 function getBounds(series: Point[][]): Bounds {
   const points = series.flat();
   const xs = points.map(([x]) => x);
@@ -132,6 +145,17 @@ function MiniRoute({ points, color = '#1674e8', grid = false, label }: { points:
   );
 }
 
+function FitRouteBounds({ bounds }: { bounds: LatLngBounds }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.fitBounds(bounds, { padding: [42, 42], maxZoom: 15, animate: false });
+    window.requestAnimationFrame(() => map.invalidateSize());
+  }, [bounds, map]);
+
+  return null;
+}
+
 function MapCanvas({ caseData, topK, activeCandidate, gpsVisible, gridVisible, onCandidateClick, onGpsToggle, onGridToggle }: {
   caseData: CaseData;
   topK: number;
@@ -142,14 +166,51 @@ function MapCanvas({ caseData, topK, activeCandidate, gpsVisible, gridVisible, o
   onGpsToggle: () => void;
   onGridToggle: () => void;
 }) {
-  const candidates = caseData.candidates.slice(0, topK);
-  const gridMercator = gridToMercator(caseData.query.grid);
-  const bounds = getBounds([caseData.query.mercator, gridMercator, ...caseData.candidates.map((candidate) => candidate.mercator)]);
-  const queryRoute = projectPoints(caseData.query.mercator, bounds, 100, 70, 5);
-  const gridRoute = projectPoints(gridMercator, bounds, 100, 70, 5);
+  const candidates = useMemo(() => caseData.candidates.slice(0, topK), [caseData.candidates, topK]);
+  const queryRoute = useMemo(() => toLeafletPositions(caseData.query.gps), [caseData.query.gps]);
+  const gridRoute = useMemo(
+    () => toLeafletPositions(gridToMercator(caseData.query.grid).map(mercatorToLonLat)),
+    [caseData.query.grid],
+  );
+  const candidateRoutes = useMemo(
+    () => candidates.map((candidate) => ({ candidate, positions: toLeafletPositions(candidate.gps) })),
+    [candidates],
+  );
+  const mapBounds = useMemo(
+    () => latLngBounds([queryRoute, gridRoute, ...candidateRoutes.map(({ positions }) => positions)].flat()),
+    [candidateRoutes, gridRoute, queryRoute],
+  );
+
   return (
     <div className="map-canvas" aria-label="Porto trajectory comparison">
-      <div className="map-label">Porto · normalized projected-coordinate route view</div>
+      <MapContainer className="leaflet-map" bounds={mapBounds} boundsOptions={{ padding: [42, 42] }} zoomControl={false} scrollWheelZoom preferCanvas>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · tiles by <a href="https://www.openstreetmap.de/">OSM.de</a>'
+          url="https://tile.openstreetmap.de/{z}/{x}/{y}.png"
+          maxZoom={19}
+        />
+        <ZoomControl position="bottomleft" />
+        <FitRouteBounds bounds={mapBounds} />
+        {gpsVisible && candidateRoutes.map(({ candidate, positions }) => {
+          const visible = !activeCandidate || activeCandidate === candidate.id;
+          const opacity = visible ? 0.98 : 0.14;
+          const weight = activeCandidate === candidate.id ? 6 : 4;
+          const eventHandlers = { click: () => onCandidateClick(candidate.id) };
+          return (
+            <Polyline key={candidate.id} positions={positions} pathOptions={{ color: candidate.color, weight, opacity, lineCap: 'round', lineJoin: 'round' }} eventHandlers={eventHandlers}>
+              <Tooltip sticky direction="top">Top-{candidate.rank} · {candidate.id}</Tooltip>
+            </Polyline>
+          );
+        })}
+        {gridVisible && <Polyline positions={gridRoute} pathOptions={{ color: '#0b5fc5', weight: 3, opacity: 0.72, dashArray: '7 7', lineCap: 'square' }}><Tooltip sticky>Query · 100 m grid cells</Tooltip></Polyline>}
+        {gpsVisible && <>
+          <Polyline positions={queryRoute} pathOptions={{ color: '#ffffff', weight: 8, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} interactive={false} />
+          <Polyline positions={queryRoute} pathOptions={{ color: '#086fe8', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }}><Tooltip sticky>Query · {caseData.id}</Tooltip></Polyline>
+          <CircleMarker center={queryRoute[0]} radius={6} pathOptions={{ color: '#086fe8', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}><Tooltip direction="top">Query start</Tooltip></CircleMarker>
+          <CircleMarker center={queryRoute.at(-1)!} radius={6} pathOptions={{ color: '#086fe8', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}><Tooltip direction="top">Query end</Tooltip></CircleMarker>
+        </>}
+      </MapContainer>
+      <div className="map-label">Porto · real WGS84 coordinates</div>
       <div className="map-legend" aria-label="Route colour legend">
         <span><i className="legend-line legend-line--query" />Query</span>
         {candidates.map((candidate) => <span key={candidate.id}><i className="legend-line" style={{ background: candidate.color }} />Top-{candidate.rank}</span>)}
@@ -158,21 +219,6 @@ function MapCanvas({ caseData, topK, activeCandidate, gpsVisible, gridVisible, o
         <label><input type="checkbox" checked={gpsVisible} onChange={onGpsToggle} /> GPS</label>
         <label><input type="checkbox" checked={gridVisible} onChange={onGridToggle} /> Grid</label>
       </div>
-      <svg className="trajectory-map" viewBox="0 0 100 70" role="img" aria-label="Query and candidate trajectories">
-        <defs><filter id="routeGlow" x="-15%" y="-30%" width="130%" height="160%"><feGaussianBlur stdDeviation="0.9" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter></defs>
-        {gpsVisible && candidates.map((candidate) => {
-          const active = !activeCandidate || activeCandidate === candidate.id;
-          const route = projectPoints(candidate.mercator, bounds, 100, 70, 5);
-          return (
-            <g key={candidate.id} className="candidate-route" opacity={active ? 1 : 0.12} onClick={() => onCandidateClick(candidate.id)} role="button" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onCandidateClick(candidate.id)} aria-label={`Highlight candidate trajectory ${candidate.id}`}>
-              <polyline points={pointString(route)} fill="none" stroke={candidate.color} strokeWidth={activeCandidate === candidate.id ? '2.25' : '1.65'} strokeLinecap="round" strokeLinejoin="round" filter="url(#routeGlow)" />
-              <circle cx={route.at(-1)![0]} cy={route.at(-1)![1]} r="1.35" fill="#fff" stroke={candidate.color} strokeWidth="0.8" />
-            </g>
-          );
-        })}
-        {gridVisible && <polyline points={pointString(gridRoute)} fill="none" stroke="#1674e8" strokeWidth="1.1" strokeDasharray="1.9 1.5" opacity="0.72" strokeLinecap="round" strokeLinejoin="round" />}
-        {gpsVisible && <g><polyline points={pointString(queryRoute)} fill="none" stroke="#1674e8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" filter="url(#routeGlow)" /><circle cx={queryRoute[0][0]} cy={queryRoute[0][1]} r="1.65" fill="#fff" stroke="#1674e8" strokeWidth="1" /><circle cx={queryRoute.at(-1)![0]} cy={queryRoute.at(-1)![1]} r="1.65" fill="#fff" stroke="#1674e8" strokeWidth="1" /></g>}
-      </svg>
     </div>
   );
 }
