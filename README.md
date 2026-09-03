@@ -1,6 +1,6 @@
 # TrajAgg Explorer
 
-TrajAgg Explorer is an interactive academic demo of trajectory-similarity retrieval. The browser does not train a model: it reads static cases exported offline from a saved TrajAgg checkpoint.
+TrajAgg Explorer is an interactive academic demo of trajectory-similarity retrieval. It supports two clearly labelled data paths: the public site reads 100 validated cases exported from a saved checkpoint, while an optional private FastAPI service performs on-demand inference for any of the 7,000 Porto test trajectories. Neither path trains a model in the browser.
 
 ## Current data status
 
@@ -44,6 +44,19 @@ The development server normally prints `http://localhost:5173`. Run the producti
 npm run build
 ```
 
+By default this opens the public-compatible 100-query static mode. To use live
+RTX 3090 inference, first start the server API and an SSH tunnel as documented in
+[`backend/README.md`](backend/README.md), then create `.env.local`:
+
+```bash
+cp .env.example .env.local
+npm run dev
+```
+
+The interface will then offer all 7,000 IDs from `Q-03000` through `Q-09999`.
+If the private API cannot be reached, it explicitly falls back to the validated
+100-query static mode.
+
 ## What the interface shows
 
 1. Search and page through 100 real Porto test trajectories selected with a fixed-seed, coverage-oriented strategy.
@@ -52,6 +65,10 @@ npm run build
 4. Compare measured TrajAgg retrieval time with direct Hausdorff search for the selected query.
 5. View each candidate's Chebyshev distance, Hausdorff ground-truth distance, and ground-truth rank.
 6. Follow the query → dual-scale encoder → embedding library → Top-k trace.
+
+In live mode, selecting a query loads only its real geometry. Clicking **Run live
+Top-k** performs author-compatible preprocessing, fresh query encoding, and
+Chebyshev retrieval on the server, then reports the synchronized request timing.
 
 The central route canvas places the exported WGS84 coordinates on an interactive Porto street map. It uses OpenStreetMap cartography with visible attribution, and supports pan, zoom, route tooltips, candidate highlighting, and GPS/grid visibility controls. Timestamp and duration are marked unavailable because the author-compatible preprocessed 10,000-trajectory subset retains `trajlen`, `wgs_seq`, and `merc_seq`, but not those metadata fields.
 
@@ -80,7 +97,19 @@ The non-invasive export workflow keeps the author repository unchanged:
 2. At each author-defined best-validation event, persist `best_checkpoint.pt`, `test_embeddings.pt`, and `best_metrics.json`.
 3. Use `scripts/export_trajagg_demo_data.py` to rank candidates and write the static JSON cases.
 
-The front end only reads these exported files; it does not load PyTorch, the 525 MB distance matrix, or the full embedding library.
+The public front end only reads these exported files; it does not load PyTorch,
+the 525 MB distance matrix, or the full embedding library. The optional private
+backend loads those artifacts once and exposes read-only retrieval endpoints:
+
+- `GET /api/health`
+- `GET /api/config`
+- `GET /api/queries`
+- `GET /api/queries/{query_id}`
+- `POST /api/retrieve`
+
+The API is bound to server localhost by default. A public GitHub Pages build
+continues to use static mode until a laboratory-approved public HTTPS reverse
+proxy is available.
 
 ## Publishing
 

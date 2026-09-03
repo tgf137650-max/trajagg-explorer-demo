@@ -13,7 +13,7 @@ type QuerySummary = {
   pointCount: number;
   sourceIndex: number;
   previewGps: Point[];
-  caseFile: string;
+  caseFile?: string | null;
 };
 
 type Candidate = {
@@ -42,7 +42,8 @@ type TimingStats = {
   maxMs: number;
 };
 
-type QueryTiming = {
+type OfflineQueryTiming = {
+  status?: 'measured-real-artifact';
   learned: {
     preprocess: TimingStats;
     encode: TimingStats;
@@ -58,7 +59,31 @@ type QueryTiming = {
   speedupVsDirectHausdorff: number;
 };
 
+type LiveQueryTiming = {
+  status: 'measured-live-request';
+  protocol: {
+    statement: string;
+    cudaSynchronization: boolean;
+    browserRenderingTimed: boolean;
+  };
+  learned: {
+    preprocessMs: number;
+    encodeMs: number;
+    chebyshevDistanceAndTopKMs: number;
+    totalMs: number;
+    maxAbsErrorVsSavedEmbedding: number;
+  };
+  groundTruthLookupMs: number;
+  serverProcessingMs?: number;
+  serverEndToEndMs?: number;
+  browserRoundTripMs?: number;
+};
+
+type QueryTiming = OfflineQueryTiming | LiveQueryTiming;
+
 type CaseData = {
+  schemaVersion?: string;
+  mode?: string;
   id: string;
   metadata: QuerySummary & { area: string; description: string };
   query: { sourceIndex: number; gps: Point[]; mercator: Point[]; grid: Point[] };
@@ -72,7 +97,16 @@ type CaseData = {
     embeddingDimension: number;
   };
   provenance: { kind: string; bestEpoch: number; selectionRule: string };
-  timing: QueryTiming;
+  timing: QueryTiming | null;
+};
+
+type LiveQueryPage = {
+  schemaVersion: string;
+  mode: 'live-api';
+  total: number;
+  offset: number;
+  limit: number;
+  items: QuerySummary[];
 };
 
 type Reproduction = {
@@ -122,6 +156,7 @@ type IndexData = {
 type Bounds = { minX: number; maxX: number; minY: number; maxY: number };
 
 const DATA_ROOT = `${import.meta.env.BASE_URL}data/`;
+const LIVE_API_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 const RETRIEVAL_STEPS = ['Preprocessing', 'TrajAgg encoding', 'Chebyshev ranking', 'Results returned'];
 const EARTH_RADIUS = 6378137;
 const GRID_SIZE_METERS = 100;
@@ -288,22 +323,23 @@ function MapCanvas({ caseData, topK, activeCandidate, gpsVisible, gridVisible, o
   );
 }
 
-function EmbeddingDots({ values, tone = 'purple' }: { values: number[]; tone?: 'purple' | 'blue' | 'green' }) {
-  return <span className={`embedding-dots embedding-dots--${tone}`} aria-label="Actual saved embedding vector preview">{values.slice(0, 6).map((value, index) => <i key={index} style={{ opacity: 0.35 + Math.min(Math.abs(value), 1) * 0.65 }} />)}<b>…</b></span>;
+function EmbeddingDots({ values, tone = 'purple', label = 'Actual embedding vector preview' }: { values: number[]; tone?: 'purple' | 'blue' | 'green'; label?: string }) {
+  return <span className={`embedding-dots embedding-dots--${tone}`} aria-label={label}>{values.slice(0, 6).map((value, index) => <i key={index} style={{ opacity: 0.35 + Math.min(Math.abs(value), 1) * 0.65 }} />)}<b>…</b></span>;
 }
 
 function ModelTrace({ caseData, expanded, onToggle, topK }: { caseData: CaseData; expanded: boolean; onToggle: () => void; topK: number }) {
+  const liveInference = caseData.mode === 'live-api';
   return (
     <section className={`trace-panel ${expanded ? 'trace-panel--open' : ''}`} aria-label="Model Trace">
-      <button className="trace-heading" onClick={onToggle} aria-expanded={expanded}><span className="chevron">{expanded ? '⌄' : '›'}</span><span>Model Trace · Explain this retrieval</span><small>Real offline inference artifact</small></button>
+      <button className="trace-heading" onClick={onToggle} aria-expanded={expanded}><span className="chevron">{expanded ? '⌄' : '›'}</span><span>Model Trace · Explain this retrieval</span><small>{liveInference ? 'Live model inference' : 'Real offline inference artifact'}</small></button>
       {expanded && <div className="trace-flow">
-        <article className="trace-step trace-step--query"><div className="step-title"><b>1</b><span>Query &amp; grid</span></div><p>Two representations exported for the same real query trajectory</p><div className="trace-route-pair"><div><small>GPS · {caseData.metadata.pointCount} points</small><MiniRoute points={caseData.query.gps} label="Query GPS trajectory preview" /></div><div><small>100 m grid · {caseData.query.grid.length} cells</small><MiniRoute points={caseData.query.grid} grid label="Query grid trajectory preview" /></div></div></article>
+        <article className="trace-step trace-step--query"><div className="step-title"><b>1</b><span>Query &amp; grid</span></div><p>Two author-compatible representations of the same real query trajectory</p><div className="trace-route-pair"><div><small>GPS · {caseData.metadata.pointCount} points</small><MiniRoute points={caseData.query.gps} label="Query GPS trajectory preview" /></div><div><small>100 m grid · {caseData.query.grid.length} cells</small><MiniRoute points={caseData.query.grid} grid label="Query grid trajectory preview" /></div></div></article>
         <div className="flow-arrow" aria-hidden="true">→</div>
-        <article className="trace-step trace-step--encoder"><div className="step-title"><b>2</b><span>Dual-scale encoder</span></div><p>The author model aggregates Mercator and grid streams into one vector</p><div className="encoder-flow"><div className="encoder-input"><small>Mercator stream</small><span className="encoder-chip">{caseData.metadata.pointCount} coordinate points</span><small>Grid stream</small><span className="encoder-chip encoder-chip--green">{caseData.query.grid.length} grid cells</span></div><span className="merge-arrow">⤳</span><div className="merged-vector"><small>Saved {caseData.modelTrace.embeddingDimension}-D embedding</small><EmbeddingDots values={caseData.modelTrace.mergedEmbedding} /></div></div></article>
+        <article className="trace-step trace-step--encoder"><div className="step-title"><b>2</b><span>Dual-scale encoder</span></div><p>The author model aggregates Mercator and grid streams into one vector</p><div className="encoder-flow"><div className="encoder-input"><small>Mercator stream</small><span className="encoder-chip">{caseData.metadata.pointCount} coordinate points</span><small>Grid stream</small><span className="encoder-chip encoder-chip--green">{caseData.query.grid.length} grid cells</span></div><span className="merge-arrow">⤳</span><div className="merged-vector"><small>{liveInference ? 'Fresh' : 'Saved'} {caseData.modelTrace.embeddingDimension}-D embedding</small><EmbeddingDots values={caseData.modelTrace.mergedEmbedding} label={liveInference ? 'Fresh query embedding vector preview' : 'Actual saved embedding vector preview'} /></div></div></article>
         <div className="flow-arrow" aria-hidden="true">→</div>
-        <article className="trace-step trace-step--retrieve"><div className="step-title"><b>3</b><span>Chebyshev Top-k</span></div><p>Compare the saved query vector with {caseData.modelTrace.librarySize.toLocaleString()} test-library vectors</p><div className="retrieval-flow"><div><small>Actual query embedding</small><EmbeddingDots values={caseData.modelTrace.queryEmbedding} /></div><span className="tiny-arrow">→</span><div className="library-vector"><small>Saved embedding library</small><span className="library-grid">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</span></div><span className="tiny-arrow">→</span><div className="rank-bars"><small>Top-{topK}</small>{caseData.candidates.slice(0, topK).map((candidate) => <span key={candidate.id}><b>{candidate.rank}</b><i style={{ background: candidate.color }} /></span>)}</div></div></article>
+        <article className="trace-step trace-step--retrieve"><div className="step-title"><b>3</b><span>Chebyshev Top-k</span></div><p>Compare the {liveInference ? 'fresh' : 'saved'} query vector with {caseData.modelTrace.librarySize.toLocaleString()} test-library vectors</p><div className="retrieval-flow"><div><small>Actual query embedding</small><EmbeddingDots values={caseData.modelTrace.queryEmbedding} label="Actual query embedding vector preview" /></div><span className="tiny-arrow">→</span><div className="library-vector"><small>Saved embedding library</small><span className="library-grid">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</span></div><span className="tiny-arrow">→</span><div className="rank-bars"><small>Top-{topK}</small>{caseData.candidates.slice(0, topK).map((candidate) => <span key={candidate.id}><b>{candidate.rank}</b><i style={{ background: candidate.color }} /></span>)}</div></div></article>
       </div>}
-      {expanded && <p className="trace-disclaimer">This panel uses real exported trajectories, rankings, and final embeddings. Branch-specific intermediate embeddings are not fabricated. Hausdorff is the offline supervision/evaluation ground truth; online ranking uses Chebyshev embedding distance.</p>}
+      {expanded && <p className="trace-disclaimer">This panel uses real trajectories, rankings, and final embeddings from the {liveInference ? 'current server inference request' : 'offline export'}. Branch-specific intermediate embeddings are not fabricated. Hausdorff is the offline supervision/evaluation ground truth; online ranking uses Chebyshev embedding distance.</p>}
     </section>
   );
 }
@@ -315,6 +351,25 @@ function GroundTruthBadge({ candidate }: { candidate: Candidate }) {
 
 function EfficiencyPanel({ caseData, benchmark }: { caseData: CaseData; benchmark: IndexData['benchmark'] }) {
   const timing = caseData.timing;
+  if (!timing) return null;
+  if (timing.status === 'measured-live-request') {
+    const serverProcessingMs = timing.serverProcessingMs ?? timing.serverEndToEndMs ?? timing.learned.totalMs;
+    return (
+      <section className="efficiency-panel efficiency-panel--live" aria-label="Live retrieval efficiency">
+        <div className="efficiency-heading"><div><span>LIVE REQUEST ON RTX 3090</span><b>Retrieval efficiency</b></div><em>Live API</em></div>
+        <div className="efficiency-values">
+          <span><small>TrajAgg online</small><strong>{timing.learned.totalMs.toFixed(2)} <i>ms</i></strong></span>
+          <span><small>API processing</small><strong>{serverProcessingMs.toFixed(1)} <i>ms</i></strong></span>
+          <span className="speedup-value"><small>100-query median</small><strong>{benchmark.summary.medianSpeedupAcrossQueries.toFixed(1)}<i>×</i></strong></span>
+        </div>
+        <details className="efficiency-details">
+          <summary>Live timing &amp; stage breakdown</summary>
+          <div className="timing-breakdown"><span>Preprocess <b>{timing.learned.preprocessMs.toFixed(2)} ms</b></span><span>GPU encode <b>{timing.learned.encodeMs.toFixed(2)} ms</b></span><span>Chebyshev + Top-k <b>{timing.learned.chebyshevDistanceAndTopKMs.toFixed(2)} ms</b></span></div>
+          <p>{timing.protocol.statement} Ground-truth lookup took {timing.groundTruthLookupMs.toFixed(2)} ms and is not part of online ranking.{timing.browserRoundTripMs !== undefined ? ` Browser-observed API round trip: ${timing.browserRoundTripMs.toFixed(2)} ms.` : ''} The {benchmark.summary.medianSpeedupAcrossQueries.toFixed(1)}× context is the separately measured median over 100 fixed-seed real queries.</p>
+        </details>
+      </section>
+    );
+  }
   return (
     <section className="efficiency-panel" aria-label="Measured retrieval efficiency">
       <div className="efficiency-heading"><div><span>MEASURED ON RTX 3090</span><b>Retrieval efficiency</b></div><em>Real benchmark</em></div>
@@ -370,6 +425,7 @@ function ReproductionStrip({ reproduction }: { reproduction: Reproduction }) {
 }
 
 export default function App() {
+  const [liveMode, setLiveMode] = useState(Boolean(LIVE_API_URL));
   const [indexData, setIndexData] = useState<IndexData | null>(null);
   const caseCache = useRef<Record<string, CaseData>>({});
   const [caseData, setCaseData] = useState<CaseData | null>(null);
@@ -385,6 +441,10 @@ export default function App() {
   const [retrievalStep, setRetrievalStep] = useState<number | null>(null);
   const [loadError, setLoadError] = useState('');
   const [caseLoading, setCaseLoading] = useState(false);
+  const [retrievalError, setRetrievalError] = useState('');
+  const [liveQueries, setLiveQueries] = useState<QuerySummary[]>([]);
+  const [liveQueryTotal, setLiveQueryTotal] = useState(0);
+  const [liveCatalogLoading, setLiveCatalogLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -395,14 +455,50 @@ export default function App() {
         const index = await indexResponse.json() as IndexData;
         if (!active) return;
         setIndexData(index);
-        setSelectedId(index.queries[0]?.id ?? '');
+        if (!liveMode) setSelectedId(index.queries[0]?.id ?? '');
       } catch {
         if (active) setLoadError('Unable to read the exported Porto retrieval data.');
       }
     }
     void loadData();
     return () => { active = false; };
-  }, []);
+  }, [liveMode]);
+
+  useEffect(() => {
+    if (!liveMode || !indexData) return;
+    const controller = new AbortController();
+    const debounce = window.setTimeout(async () => {
+      setLiveCatalogLoading(true);
+      setRetrievalError('');
+      try {
+        const parameters = new URLSearchParams({
+          offset: String(queryPage * QUERY_PAGE_SIZE),
+          limit: String(QUERY_PAGE_SIZE),
+          search: search.trim(),
+        });
+        const response = await fetch(`${LIVE_API_URL}/api/queries?${parameters}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Query catalogue returned ${response.status}`);
+        const page = await response.json() as LiveQueryPage;
+        if (controller.signal.aborted) return;
+        setLiveQueries(page.items);
+        setLiveQueryTotal(page.total);
+        setSelectedId((current) => page.items.some((item) => item.id === current) ? current : (page.items[0]?.id ?? ''));
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setRetrievalError('The live server is unavailable, so the interface switched to the validated 100-query static mode.');
+          setLiveMode(false);
+          setQueryPage(0);
+          setSelectedId(indexData.queries[0]?.id ?? '');
+        }
+      } finally {
+        if (!controller.signal.aborted) setLiveCatalogLoading(false);
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(debounce);
+      controller.abort();
+    };
+  }, [indexData, liveMode, queryPage, search]);
 
   useEffect(() => {
     if (!indexData || !selectedId) return;
@@ -413,7 +509,7 @@ export default function App() {
       return;
     }
 
-    const query = indexData.queries.find((item) => item.id === selectedId);
+    const query = (liveMode ? liveQueries : indexData.queries).find((item) => item.id === selectedId);
     if (!query) return;
     const queryId = query.id;
     const caseFile = query.caseFile || `cases/${queryId}.json`;
@@ -424,14 +520,19 @@ export default function App() {
 
     async function loadCase() {
       try {
-        const response = await fetch(`${DATA_ROOT}${caseFile}`, { signal: controller.signal });
+        const requestUrl = liveMode
+          ? `${LIVE_API_URL}/api/queries/${encodeURIComponent(queryId)}`
+          : `${DATA_ROOT}${caseFile}`;
+        const response = await fetch(requestUrl, { signal: controller.signal });
         if (!response.ok) throw new Error(`Unable to read ${queryId}.json`);
         const loadedCase = await response.json() as CaseData;
         caseCache.current[queryId] = loadedCase;
         setCaseData(loadedCase);
       } catch (error) {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          setLoadError(`Unable to read the real exported case ${queryId}.`);
+          setRetrievalError(liveMode
+            ? `Unable to load ${queryId} from the live server.`
+            : `Unable to read the real exported case ${queryId}.`);
         }
       } finally {
         if (!controller.signal.aborted) setCaseLoading(false);
@@ -440,7 +541,7 @@ export default function App() {
 
     void loadCase();
     return () => controller.abort();
-  }, [indexData, selectedId]);
+  }, [indexData, liveMode, liveQueries, selectedId]);
 
   useEffect(() => { setActiveCandidate(null); setDrawerCandidate(null); }, [selectedId]);
 
@@ -449,15 +550,51 @@ export default function App() {
     const keyword = search.trim().toLowerCase();
     return !keyword ? indexData.queries : indexData.queries.filter((item) => `${item.id} ${item.title} ${item.pointCount}`.toLowerCase().includes(keyword));
   }, [indexData, search]);
-  const queryPageCount = Math.max(1, Math.ceil(filteredQueries.length / QUERY_PAGE_SIZE));
+  const queryPageCount = Math.max(1, Math.ceil((liveMode ? liveQueryTotal : filteredQueries.length) / QUERY_PAGE_SIZE));
   const visibleQueries = useMemo(
-    () => filteredQueries.slice(queryPage * QUERY_PAGE_SIZE, (queryPage + 1) * QUERY_PAGE_SIZE),
-    [filteredQueries, queryPage],
+    () => liveMode ? liveQueries : filteredQueries.slice(queryPage * QUERY_PAGE_SIZE, (queryPage + 1) * QUERY_PAGE_SIZE),
+    [filteredQueries, liveMode, liveQueries, queryPage],
   );
 
   async function retrieve() {
     if (retrievalStep !== null) return;
     setActiveCandidate(null);
+    setRetrievalError('');
+    if (liveMode) {
+      setRetrievalStep(0);
+      const progress = (async () => {
+        await wait(220);
+        setRetrievalStep(1);
+        await wait(220);
+        setRetrievalStep(2);
+      })();
+      try {
+        const browserStarted = performance.now();
+        const responsePromise = fetch(`${LIVE_API_URL}/api/retrieve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queryId: selectedId, topK, includeGroundTruth: true }),
+        }).then(async (response) => {
+          if (!response.ok) throw new Error(`Retrieval returned ${response.status}`);
+          const data = await response.json() as CaseData;
+          const browserRoundTripMs = performance.now() - browserStarted;
+          if (data.timing?.status === 'measured-live-request') {
+            data.timing.browserRoundTripMs = browserRoundTripMs;
+          }
+          return data;
+        });
+        const [retrievedCase] = await Promise.all([responsePromise, progress]);
+        caseCache.current[selectedId] = retrievedCase;
+        setCaseData(retrievedCase);
+        setRetrievalStep(3);
+        await wait(360);
+      } catch {
+        setRetrievalError('Live retrieval failed. Check the server process and the SSH tunnel, then try again.');
+      } finally {
+        setRetrievalStep(null);
+      }
+      return;
+    }
     for (let index = 0; index < RETRIEVAL_STEPS.length; index += 1) {
       setRetrievalStep(index);
       await wait(index === RETRIEVAL_STEPS.length - 1 ? 360 : 540);
@@ -470,36 +607,40 @@ export default function App() {
 
   const candidates = caseData.candidates.slice(0, topK);
   const retrieving = retrievalStep !== null;
+  const queryCount = liveMode ? liveQueryTotal : indexData.queryCount;
+  const resultReady = candidates.length > 0;
   return (
     <main className="app-shell">
-      <header className="topbar"><div className="brand-block"><h1>TrajAgg Explorer</h1><span className="data-status-badge">100 real Porto queries</span></div><div className="top-config" aria-label="Fixed configuration"><Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip></div></header>
-      <div className="academic-notice"><b>Academic demo</b><span>{indexData.dataStatement}</span><span className="notice-divider" /><span>Fixed configuration · best validation-HR@1 checkpoint at Epoch {indexData.reproduction.bestEpoch}</span></div>
+      <header className="topbar"><div className="brand-block"><h1>TrajAgg Explorer</h1><span className={`data-status-badge ${liveMode ? 'data-status-badge--live' : ''}`}>{liveMode ? 'Live API · 7,000 Porto queries' : '100 validated Porto queries'}</span></div><div className="top-config" aria-label="Fixed configuration"><Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip></div></header>
+      <div className="academic-notice"><b>Academic demo</b><span>{liveMode ? 'Live GPU inference from the saved Epoch 145 checkpoint; trajectories are selected from the full Porto test split.' : indexData.dataStatement}</span><span className="notice-divider" /><span>Fixed configuration · best validation-HR@1 checkpoint at Epoch {indexData.reproduction.bestEpoch}</span></div>
+      {retrievalError && <div className="api-error" role="alert">{retrievalError}</div>}
 
       <section className="workspace">
         <aside className="query-panel">
-          <div className="panel-title"><h2>Query trajectories</h2><span>{indexData.queryCount} real queries</span></div>
-          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => { setSearch(event.target.value); setQueryPage(0); }} placeholder="Search ID or point count…" aria-label="Search query trajectories" /></label>
+          <div className="panel-title"><h2>Query trajectories</h2><span>{queryCount.toLocaleString()} real queries</span></div>
+          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => { setSearch(event.target.value); setQueryPage(0); }} placeholder={liveMode ? 'Search Q-03000 … Q-09999' : 'Search ID or point count…'} aria-label="Search query trajectories" /></label>
+          {liveCatalogLoading && <span className="catalog-status">Loading real Porto catalogue…</span>}
           <div className="query-list">{visibleQueries.map((query) => {
             return <button key={query.id} className={`query-item ${query.id === selectedId ? 'query-item--active' : ''}`} onClick={() => setSelectedId(query.id)}><MiniRoute points={query.previewGps} color={query.id === selectedId ? '#1674e8' : '#9ba9bd'} label={`${query.id} real route thumbnail`} /><span className="query-info"><b>{query.id}</b><small>{query.distanceKm.toFixed(2)} km · {query.pointCount} GPS points</small><small>Real Porto test trajectory</small></span><i>›</i></button>;
           })}{visibleQueries.length === 0 && <p className="query-empty">No matching real query.</p>}</div>
-          <nav className="query-pagination" aria-label="Query trajectory pages"><button onClick={() => setQueryPage((value) => Math.max(0, value - 1))} disabled={queryPage === 0}>‹ Prev</button><span>Page <b>{queryPage + 1}</b> / {queryPageCount}<small>{filteredQueries.length} matches</small></span><button onClick={() => setQueryPage((value) => Math.min(queryPageCount - 1, value + 1))} disabled={queryPage >= queryPageCount - 1}>Next ›</button></nav>
+          <nav className="query-pagination" aria-label="Query trajectory pages"><button onClick={() => setQueryPage((value) => Math.max(0, value - 1))} disabled={queryPage === 0}>‹ Prev</button><span>Page <b>{queryPage + 1}</b> / {queryPageCount}<small>{(liveMode ? liveQueryTotal : filteredQueries.length).toLocaleString()} matches</small></span><button onClick={() => setQueryPage((value) => Math.min(queryPageCount - 1, value + 1))} disabled={queryPage >= queryPageCount - 1}>Next ›</button></nav>
           <div className="preview-stack"><div><div className="preview-label">GPS trajectory <button onClick={() => setGpsVisible((value) => !value)}>{gpsVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.gps} label="GPS trajectory preview" /></div><div><div className="preview-label">100 m grid trajectory <button onClick={() => setGridVisible((value) => !value)}>{gridVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.grid} grid label="Grid trajectory preview" /></div></div>
-          <div className="retrieval-controls"><div className="topk-toggle" role="group" aria-label="Select result count"><button className={topK === 1 ? 'is-active' : ''} onClick={() => setTopK(1)}>Top-1</button><button className={topK === 3 ? 'is-active' : ''} onClick={() => setTopK(3)}>Top-3</button></div><button className="retrieve-button" onClick={retrieve} disabled={retrieving}>{retrieving ? <><span className="spinner" />{RETRIEVAL_STEPS[retrievalStep]}</> : <>⌕ Retrieve Top-{topK}</>}</button></div>
+          <div className="retrieval-controls"><div className="topk-toggle" role="group" aria-label="Select result count"><button className={topK === 1 ? 'is-active' : ''} onClick={() => setTopK(1)}>Top-1</button><button className={topK === 3 ? 'is-active' : ''} onClick={() => setTopK(3)}>Top-3</button></div><button className="retrieve-button" onClick={retrieve} disabled={retrieving || !selectedId}>{retrieving ? <><span className="spinner" />{RETRIEVAL_STEPS[retrievalStep]}</> : <>⌕ {liveMode ? 'Run live' : 'Retrieve'} Top-{topK}</>}</button></div>
         </aside>
 
         <section className="map-panel">
           <MapCanvas caseData={caseData} topK={topK} activeCandidate={activeCandidate} gpsVisible={gpsVisible} gridVisible={gridVisible} onCandidateClick={setActiveCandidate} onGpsToggle={() => setGpsVisible((value) => !value)} onGridToggle={() => setGridVisible((value) => !value)} />
-          {retrieving && <div className="retrieval-toast" role="status"><span className="spinner" /><div><b>{RETRIEVAL_STEPS[retrievalStep]}</b><p>{retrievalStep === 0 ? 'Mercator, 100 m grid mapping, and padding' : retrievalStep === 1 ? 'Read the saved 128-D query embedding from the best checkpoint artifact' : retrievalStep === 2 ? 'Rank the 7,000-trajectory test library by Chebyshev distance' : 'Display the real exported Top-k candidates'}</p></div><i>{retrievalStep + 1}/4</i></div>}
+          {retrieving && <div className="retrieval-toast" role="status"><span className="spinner" /><div><b>{RETRIEVAL_STEPS[retrievalStep]}</b><p>{retrievalStep === 0 ? 'Mercator, 100 m grid mapping, and padding' : retrievalStep === 1 ? (liveMode ? 'Encode a fresh 128-D query embedding on the RTX 3090' : 'Read the saved 128-D query embedding from the best checkpoint artifact') : retrievalStep === 2 ? 'Rank the 7,000-trajectory test library by Chebyshev distance' : (liveMode ? 'Render the live model response' : 'Display the real exported Top-k candidates')}</p></div><i>{retrievalStep + 1}/4</i></div>}
           <div className="map-footer"><span>Blue: GPS query</span><span>Dark dashed: 100 m grid</span><span>Orange / green / purple: Top-k</span>{activeCandidate && <button onClick={() => setActiveCandidate(null)}>Show all candidates</button>}</div>
         </section>
 
-        <aside className="results-panel"><div className="panel-title"><h2>Retrieval results</h2><span>Top-{topK} of 7,000</span></div><p className="result-caption">Ranked by ascending <b>Chebyshev embedding distance</b></p><EfficiencyPanel caseData={caseData} benchmark={indexData.benchmark} /><div className="result-list">{candidates.map((candidate) => <ResultCard key={candidate.id} candidate={candidate} selected={activeCandidate === candidate.id} onSelect={() => setActiveCandidate(candidate.id)} onWhy={() => setDrawerCandidate(candidate)} />)}</div><div className="results-footnote"><b>Ground truth:</b> rank and distance come from the author-compatible Hausdorff matrix on WGS84 sequences. Values are coordinate units, not metres.</div></aside>
+        <aside className="results-panel"><div className="panel-title"><h2>Retrieval results</h2><span>Top-{topK} of 7,000</span></div><p className="result-caption">Ranked by ascending <b>Chebyshev embedding distance</b></p>{resultReady ? <><EfficiencyPanel caseData={caseData} benchmark={indexData.benchmark} /><div className="result-list">{candidates.map((candidate) => <ResultCard key={candidate.id} candidate={candidate} selected={activeCandidate === candidate.id} onSelect={() => setActiveCandidate(candidate.id)} onWhy={() => setDrawerCandidate(candidate)} />)}</div></> : <div className="awaiting-results"><span>⌁</span><b>Ready for live retrieval</b><p>Click “Run live Top-{topK}” to encode {selectedId} on the RTX 3090 and search all 7,000 saved trajectory embeddings.</p></div>}<div className="results-footnote"><b>Ground truth:</b> rank and distance come from the author-compatible Hausdorff matrix on WGS84 sequences. Values are coordinate units, not metres.</div></aside>
       </section>
 
       <section className="fixed-config" aria-label="Read-only experimental configuration"><Chip accent>⌖ Porto · 10,000</Chip><Chip>◈ Hausdorff supervision</Chip><Chip>⌁ Chebyshev retrieval</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip><span className="readonly">Read-only configuration</span></section>
       <ReproductionStrip reproduction={indexData.reproduction} />
-      <ModelTrace caseData={caseData} expanded={traceOpen} onToggle={() => setTraceOpen((value) => !value)} topK={topK} />
-      <footer className="academic-footer"><span><b>{indexData.queryCount} real query cases</b> · 7,000-trajectory test embedding library · lazy-loaded JSON</span><span>{indexData.dataOrigin}</span></footer>
+      {resultReady ? <ModelTrace caseData={caseData} expanded={traceOpen} onToggle={() => setTraceOpen((value) => !value)} topK={topK} /> : <section className="trace-panel trace-panel--waiting"><div className="trace-heading"><span className="chevron">›</span><span>Model Trace · awaiting live retrieval</span><small>Select a query and run the model</small></div></section>}
+      <footer className="academic-footer"><span><b>{liveMode ? '7,000 selectable real queries' : `${indexData.queryCount} validated real query cases`}</b> · 7,000-trajectory test embedding library · {liveMode ? 'on-demand GPU inference' : 'lazy-loaded JSON'}</span><span>{liveMode ? 'Live mode requires the private FastAPI service through an SSH tunnel; the public site remains a validated static fallback.' : indexData.dataOrigin}</span></footer>
       {drawerCandidate && <WhyDrawer caseData={caseData} candidate={drawerCandidate} onClose={() => setDrawerCandidate(null)} />}
     </main>
   );
