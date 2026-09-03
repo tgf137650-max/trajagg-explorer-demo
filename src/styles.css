@@ -54,6 +54,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(22, 116, 232
 .query-info b { color: #182746; font-size: .74rem; }
 .query-info small { color: #687b98; font-size: .65rem; white-space: nowrap; }
 .query-item > i { color: #5b77a3; font-style: normal; font-size: 1.5rem; }
+.query-empty { display: grid; min-height: 120px; margin: 0; place-items: center; color: #8292a9; font-size: .72rem; }
+.query-pagination { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 7px; padding: 8px 1px 1px; }
+.query-pagination button { min-height: 28px; padding: 4px 7px; color: #2469bc; background: #f5f9fe; border: 1px solid #d5e3f3; border-radius: 6px; font-size: .62rem; font-weight: 750; }
+.query-pagination button:last-child { justify-self: stretch; }
+.query-pagination button:disabled { color: #a5b1c1; background: #f7f9fb; border-color: #e3e8ee; cursor: default; }
+.query-pagination span { display: grid; min-width: 72px; color: #60748f; text-align: center; font-size: .61rem; }
+.query-pagination span b { color: #194f91; }
+.query-pagination small { margin-top: 1px; color: #98a6b8; font-size: .5rem; }
 
 .preview-stack { display: grid; gap: 8px; margin-top: 10px; }
 .preview-stack > div { padding: 0 2px; }

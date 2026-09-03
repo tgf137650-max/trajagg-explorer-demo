@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, ZoomControl } from 'react-leaflet';
 import { latLngBounds, type LatLngBounds } from 'leaflet';
 
@@ -11,6 +11,9 @@ type QuerySummary = {
   distanceKm: number;
   durationMin: number | null;
   pointCount: number;
+  sourceIndex: number;
+  previewGps: Point[];
+  caseFile: string;
 };
 
 type Candidate = {
@@ -80,6 +83,7 @@ type Reproduction = {
 };
 
 type IndexData = {
+  schemaVersion: string;
   status: string;
   dataStatement: string;
   dataOrigin: string;
@@ -106,6 +110,12 @@ type IndexData = {
       medianSpeedupAcrossQueries: number;
     };
   };
+  queryCount: number;
+  querySelection: {
+    selectionPurpose: string;
+    selectionStrategy: string;
+    seed: number;
+  };
   queries: QuerySummary[];
 };
 
@@ -115,6 +125,7 @@ const DATA_ROOT = `${import.meta.env.BASE_URL}data/`;
 const RETRIEVAL_STEPS = ['Preprocessing', 'TrajAgg encoding', 'Chebyshev ranking', 'Results returned'];
 const EARTH_RADIUS = 6378137;
 const GRID_SIZE_METERS = 100;
+const QUERY_PAGE_SIZE = 5;
 
 function lonLatToMercator([lon, lat]: Point): Point {
   const longitude = (lon * Math.PI) / 180;
@@ -360,7 +371,8 @@ function ReproductionStrip({ reproduction }: { reproduction: Reproduction }) {
 
 export default function App() {
   const [indexData, setIndexData] = useState<IndexData | null>(null);
-  const [caseMap, setCaseMap] = useState<Record<string, CaseData>>({});
+  const caseCache = useRef<Record<string, CaseData>>({});
+  const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const [topK, setTopK] = useState(3);
   const [activeCandidate, setActiveCandidate] = useState<string | null>(null);
@@ -369,8 +381,10 @@ export default function App() {
   const [gridVisible, setGridVisible] = useState(true);
   const [traceOpen, setTraceOpen] = useState(true);
   const [search, setSearch] = useState('');
+  const [queryPage, setQueryPage] = useState(0);
   const [retrievalStep, setRetrievalStep] = useState<number | null>(null);
   const [loadError, setLoadError] = useState('');
+  const [caseLoading, setCaseLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -379,14 +393,8 @@ export default function App() {
         const indexResponse = await fetch(`${DATA_ROOT}index.json`);
         if (!indexResponse.ok) throw new Error('Unable to read index.json');
         const index = await indexResponse.json() as IndexData;
-        const cases = await Promise.all(index.queries.map(async (query) => {
-          const response = await fetch(`${DATA_ROOT}cases/${query.id}.json`);
-          if (!response.ok) throw new Error(`Unable to read ${query.id}.json`);
-          return response.json() as Promise<CaseData>;
-        }));
         if (!active) return;
         setIndexData(index);
-        setCaseMap(Object.fromEntries(cases.map((item) => [item.id, item])));
         setSelectedId(index.queries[0]?.id ?? '');
       } catch {
         if (active) setLoadError('Unable to read the exported Porto retrieval data.');
@@ -396,14 +404,56 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (!indexData || !selectedId) return;
+    const cached = caseCache.current[selectedId];
+    if (cached) {
+      setCaseData(cached);
+      setCaseLoading(false);
+      return;
+    }
+
+    const query = indexData.queries.find((item) => item.id === selectedId);
+    if (!query) return;
+    const queryId = query.id;
+    const caseFile = query.caseFile || `cases/${queryId}.json`;
+    const controller = new AbortController();
+    setCaseData(null);
+    setCaseLoading(true);
+    setLoadError('');
+
+    async function loadCase() {
+      try {
+        const response = await fetch(`${DATA_ROOT}${caseFile}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Unable to read ${queryId}.json`);
+        const loadedCase = await response.json() as CaseData;
+        caseCache.current[queryId] = loadedCase;
+        setCaseData(loadedCase);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setLoadError(`Unable to read the real exported case ${queryId}.`);
+        }
+      } finally {
+        if (!controller.signal.aborted) setCaseLoading(false);
+      }
+    }
+
+    void loadCase();
+    return () => controller.abort();
+  }, [indexData, selectedId]);
+
   useEffect(() => { setActiveCandidate(null); setDrawerCandidate(null); }, [selectedId]);
 
-  const caseData = selectedId ? caseMap[selectedId] : undefined;
-  const visibleQueries = useMemo(() => {
+  const filteredQueries = useMemo(() => {
     if (!indexData) return [];
     const keyword = search.trim().toLowerCase();
-    return !keyword ? indexData.queries : indexData.queries.filter((item) => `${item.id} ${item.title}`.toLowerCase().includes(keyword));
+    return !keyword ? indexData.queries : indexData.queries.filter((item) => `${item.id} ${item.title} ${item.pointCount}`.toLowerCase().includes(keyword));
   }, [indexData, search]);
+  const queryPageCount = Math.max(1, Math.ceil(filteredQueries.length / QUERY_PAGE_SIZE));
+  const visibleQueries = useMemo(
+    () => filteredQueries.slice(queryPage * QUERY_PAGE_SIZE, (queryPage + 1) * QUERY_PAGE_SIZE),
+    [filteredQueries, queryPage],
+  );
 
   async function retrieve() {
     if (retrievalStep !== null) return;
@@ -416,23 +466,23 @@ export default function App() {
   }
 
   if (loadError) return <main className="loading-state"><h1>TrajAgg Explorer</h1><p>{loadError}</p></main>;
-  if (!indexData || !caseData) return <main className="loading-state"><span className="loading-orb" /><h1>Loading TrajAgg Explorer</h1><p>Reading real exported Porto cases…</p></main>;
+  if (!indexData || !caseData) return <main className="loading-state"><span className="loading-orb" /><h1>Loading TrajAgg Explorer</h1><p>{caseLoading ? `Loading ${selectedId || 'the first'} real Porto case on demand…` : 'Reading the real Porto query index…'}</p></main>;
 
   const candidates = caseData.candidates.slice(0, topK);
   const retrieving = retrievalStep !== null;
   return (
     <main className="app-shell">
-      <header className="topbar"><div className="brand-block"><h1>TrajAgg Explorer</h1><span className="data-status-badge">Real Porto export</span></div><div className="top-config" aria-label="Fixed configuration"><Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip></div></header>
+      <header className="topbar"><div className="brand-block"><h1>TrajAgg Explorer</h1><span className="data-status-badge">100 real Porto queries</span></div><div className="top-config" aria-label="Fixed configuration"><Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip></div></header>
       <div className="academic-notice"><b>Academic demo</b><span>{indexData.dataStatement}</span><span className="notice-divider" /><span>Fixed configuration · best validation-HR@1 checkpoint at Epoch {indexData.reproduction.bestEpoch}</span></div>
 
       <section className="workspace">
         <aside className="query-panel">
-          <div className="panel-title"><h2>Query trajectories</h2><span>Real Porto test split</span></div>
-          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search trajectory ID…" aria-label="Search query trajectories" /></label>
+          <div className="panel-title"><h2>Query trajectories</h2><span>{indexData.queryCount} real queries</span></div>
+          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => { setSearch(event.target.value); setQueryPage(0); }} placeholder="Search ID or point count…" aria-label="Search query trajectories" /></label>
           <div className="query-list">{visibleQueries.map((query) => {
-            const itemCase = caseMap[query.id];
-            return <button key={query.id} className={`query-item ${query.id === selectedId ? 'query-item--active' : ''}`} onClick={() => setSelectedId(query.id)}><MiniRoute points={itemCase.query.gps} color={query.id === selectedId ? '#1674e8' : '#9ba9bd'} label={`${query.id} real route thumbnail`} /><span className="query-info"><b>{query.id}</b><small>{query.distanceKm.toFixed(2)} km · {query.pointCount} GPS points</small><small>Timestamp unavailable</small></span><i>›</i></button>;
-          })}</div>
+            return <button key={query.id} className={`query-item ${query.id === selectedId ? 'query-item--active' : ''}`} onClick={() => setSelectedId(query.id)}><MiniRoute points={query.previewGps} color={query.id === selectedId ? '#1674e8' : '#9ba9bd'} label={`${query.id} real route thumbnail`} /><span className="query-info"><b>{query.id}</b><small>{query.distanceKm.toFixed(2)} km · {query.pointCount} GPS points</small><small>Real Porto test trajectory</small></span><i>›</i></button>;
+          })}{visibleQueries.length === 0 && <p className="query-empty">No matching real query.</p>}</div>
+          <nav className="query-pagination" aria-label="Query trajectory pages"><button onClick={() => setQueryPage((value) => Math.max(0, value - 1))} disabled={queryPage === 0}>‹ Prev</button><span>Page <b>{queryPage + 1}</b> / {queryPageCount}<small>{filteredQueries.length} matches</small></span><button onClick={() => setQueryPage((value) => Math.min(queryPageCount - 1, value + 1))} disabled={queryPage >= queryPageCount - 1}>Next ›</button></nav>
           <div className="preview-stack"><div><div className="preview-label">GPS trajectory <button onClick={() => setGpsVisible((value) => !value)}>{gpsVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.gps} label="GPS trajectory preview" /></div><div><div className="preview-label">100 m grid trajectory <button onClick={() => setGridVisible((value) => !value)}>{gridVisible ? 'Hide' : 'Show'}</button></div><MiniRoute points={caseData.query.grid} grid label="Grid trajectory preview" /></div></div>
           <div className="retrieval-controls"><div className="topk-toggle" role="group" aria-label="Select result count"><button className={topK === 1 ? 'is-active' : ''} onClick={() => setTopK(1)}>Top-1</button><button className={topK === 3 ? 'is-active' : ''} onClick={() => setTopK(3)}>Top-3</button></div><button className="retrieve-button" onClick={retrieve} disabled={retrieving}>{retrieving ? <><span className="spinner" />{RETRIEVAL_STEPS[retrievalStep]}</> : <>⌕ Retrieve Top-{topK}</>}</button></div>
         </aside>
@@ -449,7 +499,7 @@ export default function App() {
       <section className="fixed-config" aria-label="Read-only experimental configuration"><Chip accent>⌖ Porto · 10,000</Chip><Chip>◈ Hausdorff supervision</Chip><Chip>⌁ Chebyshev retrieval</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip><span className="readonly">Read-only configuration</span></section>
       <ReproductionStrip reproduction={indexData.reproduction} />
       <ModelTrace caseData={caseData} expanded={traceOpen} onToggle={() => setTraceOpen((value) => !value)} topK={topK} />
-      <footer className="academic-footer"><span>Real exported cases · <b>7,000-trajectory test embedding library</b></span><span>{indexData.dataOrigin}</span></footer>
+      <footer className="academic-footer"><span><b>{indexData.queryCount} real query cases</b> · 7,000-trajectory test embedding library · lazy-loaded JSON</span><span>{indexData.dataOrigin}</span></footer>
       {drawerCandidate && <WhyDrawer caseData={caseData} candidate={drawerCandidate} onClose={() => setDrawerCandidate(null)} />}
     </main>
   );

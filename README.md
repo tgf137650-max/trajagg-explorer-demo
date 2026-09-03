@@ -26,7 +26,7 @@ The strict reproduction Test results shown in the interface are:
 | HR@50 | 0.861586 |
 | R10@50 | 0.991329 |
 
-The interface also shows a measured per-query efficiency comparison for the five exported cases. On an RTX 3090, the median across queries was 3.706 ms for query preprocessing + TrajAgg encoding + exhaustive Chebyshev Top-k, versus 760.905 ms for direct author `traj-dist` Hausdorff computation and sorting on one CPU process: a median 205.32× speedup. Each query used 20 warmups and 100 measured runs with CUDA synchronization; browser rendering and ground-truth matrix lookup were excluded.
+The interface also shows a measured per-query efficiency comparison for 100 exported cases. On an RTX 3090, the median across queries was 4.001 ms for query preprocessing + TrajAgg encoding + exhaustive Chebyshev Top-k, versus 855.068 ms for direct author `traj-dist` Hausdorff computation and sorting on one CPU process: a median 213.88× speedup. Each query used 20 warmups and 100 measured runs with CUDA synchronization; browser rendering and ground-truth matrix lookup were excluded.
 
 ## Run locally
 
@@ -46,7 +46,7 @@ npm run build
 
 ## What the interface shows
 
-1. Select one of five real Porto test trajectories.
+1. Search and page through 100 real Porto test trajectories selected with a fixed-seed, coverage-oriented strategy.
 2. Compare the raw GPS/WGS84 route with its 100 m grid representation.
 3. Inspect the real Chebyshev Top-1 or Top-3 from the saved 7,000-trajectory embedding library.
 4. Compare measured TrajAgg retrieval time with direct Hausdorff search for the selected query.
@@ -62,16 +62,15 @@ Hausdorff values are not labelled as metres. The author preprocessing calculates
 ```text
 public/data/
 ├── index.json
+├── query_manifest_100.json
 ├── retrieval_benchmark.json
 └── cases/
-    ├── Q-03007.json
-    ├── Q-03527.json
-    ├── Q-04493.json
-    ├── Q-06271.json
-    └── Q-08988.json
+    ├── Q-03057.json
+    ├── ...
+    └── Q-09943.json  (100 real case files)
 ```
 
-`index.json` records configuration, checkpoint selection, strict Test metrics, benchmark protocol, and query summaries. `retrieval_benchmark.json` preserves the complete per-query benchmark artifact. Each case contains the real query route, grid sequence, saved embedding preview, Top-3 candidates, Chebyshev scores, Hausdorff ground-truth ranks, and measured query timing.
+`index.json` records configuration, checkpoint selection, strict Test metrics, benchmark protocol, and lightweight query summaries. The browser loads this index first and fetches an individual case only when selected. `query_manifest_100.json` preserves the fixed-seed query selection and `retrieval_benchmark.json` preserves the complete per-query benchmark artifact. Each case contains the real query route, grid sequence, saved embedding preview, Top-3 candidates, Chebyshev scores, Hausdorff ground-truth ranks, and measured query timing.
 
 ## Offline artifact pipeline
 
