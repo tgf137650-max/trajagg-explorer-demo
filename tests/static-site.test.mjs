@@ -33,7 +33,18 @@ test('website exposes only Library and Draw route without an upload or lab API b
   assert.doesNotMatch(css, /optional-lab-button|\.upload-/);
 });
 
-test('all 100 real Library cases retain Top-3, ground truth, timings and fixed metrics', async () => {
+test('candidate cards show similarity before both distances using the shared metric styles', async () => {
+  const app = await readFile(new URL('src/App.tsx', root), 'utf8');
+  const card = app.slice(app.indexOf('function ResultCard('), app.indexOf('function WhyDrawer('));
+  assert.match(card, /<span>Similarity score<\/span><em>exp\(−distance\)<\/em><\/dt><dd>\{candidate\.predictedSimilarity\.toFixed\(6\)\}<\/dd>/);
+  assert.ok(card.indexOf('Similarity score') < card.indexOf('Chebyshev embedding distance'));
+  assert.ok(card.indexOf('Chebyshev embedding distance') < card.indexOf('Hausdorff ground-truth distance'));
+  assert.doesNotMatch(card, /0\.985770|fontSize|font-size/);
+  assert.match(card, /not a probability/);
+  assert.match(app, /exp\(−d\), not a probability/);
+});
+
+test('all 100 real Library cases retain Top-3, similarity, ground truth, timings and fixed metrics', async () => {
   const index = JSON.parse(await readFile(new URL('public/data/index.json', root)));
   assert.equal(index.queryCount, 100);
   assert.equal(index.queries.length, 100);
@@ -51,6 +62,8 @@ test('all 100 real Library cases retain Top-3, ground truth, timings and fixed m
       assert.equal(candidate.rank, i + 1);
       assert.ok(candidate.groundTruthRank > 0);
       assert.ok(Number.isFinite(candidate.hausdorffDistance));
+      assert.ok(Number.isFinite(candidate.predictedSimilarity));
+      assert.ok(Math.abs(candidate.predictedSimilarity - Math.exp(-candidate.chebyshevDistance)) < 1e-7);
     });
   }
 });
@@ -81,6 +94,7 @@ test('production application contains no private endpoint or removed connection/
   assert.doesNotMatch(bundle, /Connect optional lab API|Disconnect optional lab API|VITE_API_BASE_URL|127\.0\.0\.1:8000|10\.140\.34\.37|\/api\/(?:queries|retrieve|config|health|uploads)|Choose a GPS file|Validate & preview/);
   assert.match(bundle, /Draw route/);
   assert.match(bundle, /Library/);
+  assert.match(bundle, /Similarity score/);
   assert.match(bundle, /Browser notice:/);
   assert.match(bundle, /Please keep this page in English and turn off automatic translation\./);
 });

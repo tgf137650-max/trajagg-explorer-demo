@@ -388,6 +388,7 @@ function ResultCard({ candidate, selected, onSelect, onWhy }: { candidate: Candi
         <span className="rank-dot">{candidate.rank}</span>
         <div className="result-title"><span><strong>{candidate.id}</strong><GroundTruthBadge candidate={candidate} /></span><i /></div>
         <dl>
+          <div><dt title="Higher is more similar; derived from Chebyshev distance, not a probability."><span>Similarity score</span><em>exp(−distance)</em></dt><dd>{candidate.predictedSimilarity.toFixed(6)}</dd></div>
           <div><dt>Chebyshev embedding distance <em>online ranking</em></dt><dd>{formatDistance(candidate.chebyshevDistance)}</dd></div>
           {candidate.hausdorffDistance !== undefined ? <div><dt>Hausdorff ground-truth distance <em>offline evaluation</em></dt><dd>{formatDistance(candidate.hausdorffDistance)}</dd></div> : <div><dt>Hausdorff ground truth</dt><dd>Not computed</dd></div>}
         </dl>
