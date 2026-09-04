@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { CircleMarker, MapContainer, Polyline, Rectangle, TileLayer, Tooltip, useMap, useMapEvents, ZoomControl } from 'react-leaflet';
 import { latLngBounds, type LatLngBounds } from 'leaflet';
 import { readDataJson } from './data';
+import { fitRoutePreview } from './routePreview';
 import { BrowserRetrievalClient } from './browser/client';
 import { DrawControls } from './browser/DrawControls';
 import { DRAW_POLICY, insidePorto, inspectDrawing, samplePolyline } from './browser/drawing';
@@ -188,10 +189,6 @@ function projectPoints(points: Point[], bounds: Bounds, width: number, height: n
   return points.map(([x, y]) => [offsetX + (x - bounds.minX) * scale, height - (offsetY + (y - bounds.minY) * scale)]);
 }
 
-function normaliseRoute(points: Point[], width = 100, height = 44, padding = 5): Point[] {
-  return projectPoints(points, getBounds([points]), width, height, padding);
-}
-
 function pointString(points: Point[]) {
   return points.map(([x, y]) => `${x},${y}`).join(' ');
 }
@@ -210,7 +207,7 @@ function Chip({ children, accent = false }: { children: React.ReactNode; accent?
 
 function MiniRoute({ points, color = '#1674e8', grid = false, label }: { points: Point[]; color?: string; grid?: boolean; label: string }) {
   if (!points.length) return <div className="mini-route mini-route--empty">Add a route to preview</div>;
-  const rendered = normaliseRoute(points);
+  const rendered = fitRoutePreview(points, { grid });
   return (
     <svg className="mini-route" viewBox="0 0 100 44" role="img" aria-label={label}>
       <path className="mini-route__base" d="M4 7 H96 M4 22 H96 M4 37 H96" />
@@ -603,7 +600,7 @@ export default function App() {
       <section className="workspace">
         <aside className="query-panel">
           <div className="panel-title"><h2>Query trajectory</h2><span>{queryMode === 'draw' ? 'Your drawn route' : `${queryCount.toLocaleString()} real queries`}</span></div>
-          <div className="query-source-switch" role="group" aria-label="Query source"><button aria-pressed={queryMode === 'library'} disabled={busy} onClick={() => switchMode('library')}>Library</button><button aria-pressed={queryMode === 'draw'} disabled={busy} onClick={() => switchMode('draw')}>Draw route</button></div>
+          <div className="query-source-switch" role="group" aria-label="Query source"><button aria-pressed={queryMode === 'library'} disabled={busy} onClick={() => switchMode('library')}>Dataset Query</button><button aria-pressed={queryMode === 'draw'} disabled={busy} onClick={() => switchMode('draw')}>Custom Query</button></div>
           {queryMode === 'library' ? <>
           <label className="search-box"><span>⌕</span><input disabled={busy} value={search} onChange={(event) => { setSearch(event.target.value); setQueryPage(0); }} placeholder="Search ID or point count…" aria-label="Search query trajectories" /></label>
           <div className="query-list">{visibleQueries.map((query) => {
@@ -628,7 +625,7 @@ export default function App() {
       {queryMode !== 'library' && <p className="query-evaluation-note">Reference evaluation on the fixed Porto test split below — these are not accuracy scores for your drawn trajectory.</p>}
       <ReproductionStrip reproduction={indexData.reproduction} />
       {resultReady && shownCase ? <ModelTrace caseData={shownCase} expanded={traceOpen} onToggle={() => setTraceOpen((value) => !value)} topK={topK} /> : <section className="trace-panel trace-panel--waiting"><div className="trace-heading"><span className="chevron">›</span><span>Model Trace · awaiting retrieval</span><small>Select a library case or draw a query route</small></div></section>}
-      <footer className="academic-footer"><span><b>{queryMode === 'draw' ? 'Drawn query · browser inference' : `${indexData.queryCount} validated real query cases`}</b> · 7,000-trajectory test embedding library</span><span>{queryMode === 'draw' ? 'Epoch 145 ONNX model · exact Chebyshev search · no lab connection · new-query GT unavailable' : 'Library examples are exported results. Draw route performs new inference on your device.'}</span></footer>
+      <footer className="academic-footer"><span><b>{queryMode === 'draw' ? 'Drawn query · browser inference' : `${indexData.queryCount} validated real query cases`}</b> · 7,000-trajectory test embedding library</span><span>{queryMode === 'draw' ? 'Epoch 145 ONNX model · exact Chebyshev search · no lab connection · new-query GT unavailable' : 'Dataset Query shows exported results. Custom Query performs new inference on your device.'}</span></footer>
       {drawerCandidate && shownCase && <WhyDrawer caseData={shownCase} candidate={drawerCandidate} onClose={() => setDrawerCandidate(null)} />}
     </main>
   );

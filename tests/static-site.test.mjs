@@ -17,11 +17,13 @@ test('English browser notice stays below the header and above both query modes',
   assert.doesNotMatch(notice, /onClick|\shidden(?:[\s=>])|\{queryMode/);
 });
 
-test('website exposes only Library and Draw route without an upload or lab API branch', async () => {
+test('website exposes Dataset Query and Custom Query without an upload or lab API branch', async () => {
   const app = await readFile(new URL('src/App.tsx', root), 'utf8');
   assert.match(app, /useState<'library' \| 'draw'>/);
-  assert.match(app, />Library<\/button>/);
-  assert.match(app, />Draw route<\/button>/);
+  assert.match(app, /switchMode\('library'\)\}>Dataset Query<\/button>/);
+  assert.match(app, /switchMode\('draw'\)\}>Custom Query<\/button>/);
+  assert.doesNotMatch(app, />(?:Library|Draw route)<\/button>/);
+  assert.match(app, /const rendered = fitRoutePreview\(points, \{ grid \}\)/);
   assert.doesNotMatch(app, /LIVE_API|VITE_API|liveMode|\/api\/|upload|from ['"]\.\/api/);
   assert.match(app, /BrowserRetrievalClient/);
   assert.match(app, /readDataJson<IndexData>/);
@@ -92,8 +94,8 @@ test('production application contains no private endpoint or removed connection/
   assert.ok(appFile, 'Run npm run build first');
   const bundle = await readFile(new URL(`dist/assets/${appFile}`, root), 'utf8');
   assert.doesNotMatch(bundle, /Connect optional lab API|Disconnect optional lab API|VITE_API_BASE_URL|127\.0\.0\.1:8000|10\.140\.34\.37|\/api\/(?:queries|retrieve|config|health|uploads)|Choose a GPS file|Validate & preview/);
-  assert.match(bundle, /Draw route/);
-  assert.match(bundle, /Library/);
+  assert.match(bundle, /Dataset Query/);
+  assert.match(bundle, /Custom Query/);
   assert.match(bundle, /Similarity score/);
   assert.match(bundle, /Browser notice:/);
   assert.match(bundle, /Please keep this page in English and turn off automatic translation\./);

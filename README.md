@@ -1,10 +1,10 @@
 # TrajAgg Explorer
 
-TrajAgg Explorer is an interactive academic demo of trajectory-similarity retrieval. The website has two paths: **Library**, with 100 validated exported cases, and **Draw route**, with new map-drawn queries encoded directly in the browser. File upload and laboratory API connections have been removed from the website. The saved Epoch 145 model is reused; neither path trains a model. No lab connection, SSH tunnel or API configuration is required.
+TrajAgg Explorer is an interactive academic demo of trajectory-similarity retrieval. The website has two paths: **Dataset Query**, with 100 validated exported cases, and **Custom Query**, with new map-drawn queries encoded directly in the browser. File upload and laboratory API connections have been removed from the website. The saved Epoch 145 model is reused; neither path trains a model. No lab connection, SSH tunnel or API configuration is required.
 
 ## Draw and retrieve (browser-only)
 
-1. Open the local page and choose **Draw route** in the left panel.
+1. Open the local page and choose **Custom Query** in the left panel.
 2. Click inside the outlined Porto study area in travel order. Drag to pan; use zoom controls as needed. With the map focused, arrow keys pan and Enter adds a point at its centre.
 3. Draw 1–25 km using 2–64 control points. Undo, Clear and Edit let you revise the route. Edits invalidate old results.
 4. Choose Top-1 or Top-3 and click **Run browser Top-k**. First use downloads/prepares the model, 7,000 saved vectors, candidate geometry and WASM engine (about 24 MB uncompressed). Subsequent queries reuse the in-memory model.
@@ -25,6 +25,7 @@ The worker verifies asset sizes and SHA256 hashes before use. Its vectors and al
 - `src/browser/`: drawing rules, preprocessing, inference worker, cancellation/progress client and timing types.
 - `tests/static-site.test.mjs`: confirms the two-mode UI has no upload/API path, validates all 100 local cases, checks asset-loading errors and scans the built app for old connection controls/endpoints.
 - `tests/browser.test.mjs`: input guards, shape-preserving sampling, all 100 real-case model checks, a fresh synthetic drawing, Top-1/3, production-worker errors/retry and no-API asset loading.
+- `tests/route-preview.test.mjs`: display-only Mercator fitting, grid scaling, degenerate routes, a long drawing and all 100 real query previews. Preview fitting does not modify model inputs.
 
 Local model checks: all 100 identity queries matched the saved vectors within 1e-5 (maximum observed error 4.77e-7). Prior independent conversion checks also matched the ordered, self-excluded Top-3/10/50 in all 100 cases. These tests run the actual Web WASM engine in Node, including the built worker, not a fake model. The user reviewed and approved the local interface before publication; automated cross-browser UI testing is not implied by a build or Node test.
 
@@ -78,7 +79,7 @@ The development server normally prints `http://localhost:5173`. Run the producti
 npm run build
 ```
 
-This opens the 100-query Library view with **Draw route** available. Both paths work with static hosting; no `.env.local`, laboratory service or SSH tunnel is needed. Any old `VITE_API_BASE_URL` setting is ignored by the frontend.
+This opens the 100-case **Dataset Query** view with **Custom Query** available. Both paths work with static hosting; no `.env.local`, laboratory service or SSH tunnel is needed. Any old `VITE_API_BASE_URL` setting is ignored by the frontend.
 
 ## What the interface shows
 
@@ -89,7 +90,7 @@ This opens the 100-query Library view with **Draw route** available. Both paths 
 5. View each candidate's Chebyshev distance, Hausdorff ground-truth distance, and ground-truth rank.
 6. Follow the query → dual-scale encoder → embedding library → Top-k trace.
 
-Choose **Draw route** to create a new query and run the saved model directly on your device. The Library button replays already exported results; its measured RTX 3090 benchmark remains clearly separate from fresh browser timings.
+Choose **Custom Query** to create a new query and run the saved model directly on your device. **Dataset Query** replays already exported results; its measured RTX 3090 benchmark remains clearly separate from fresh browser timings.
 
 The central route canvas places the exported WGS84 coordinates on an interactive Porto street map. It uses OpenStreetMap cartography with visible attribution, and supports pan, zoom, route tooltips, candidate highlighting, and GPS/grid visibility controls. Timestamp and duration are marked unavailable because the author-compatible preprocessed 10,000-trajectory subset retains `trajlen`, `wgs_seq`, and `merc_seq`, but not those metadata fields.
 
@@ -118,7 +119,7 @@ The non-invasive export workflow keeps the author repository unchanged:
 2. At each author-defined best-validation event, persist `best_checkpoint.pt`, `test_embeddings.pt`, and `best_metrics.json`.
 3. Use `scripts/export_trajagg_demo_data.py` to rank candidates and write the static JSON cases.
 
-The Library path reads the exported JSON. The Draw-route path additionally loads the ONNX model and full embedding/geometry library on demand, but never PyTorch or the 525 MB distance matrix.
+The Dataset Query path reads the exported JSON. The Custom Query path additionally loads the ONNX model and full embedding/geometry library on demand, but never PyTorch or the 525 MB distance matrix.
 
 Earlier server scripts under `backend/` and standalone upload/API helpers/tests are retained only as historical local research material. The frontend does not import them, expose upload controls, read endpoint configuration or call their endpoints. They are not required for this site or included as executable code in the frontend build.
 
