@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "1.0",
+  "status": "local-conversion-awaiting-web-validation",
+  "sourceCommit": "f8e7f55391048459f25140265ed31ab8a3fe703b",
+  "bestEpoch": 145,
+  "checkpointSha256": "8d177ecf405d463005e135086d42f431de76fad04e6a3cd1e33cfb1df632ba8c",
+  "savedEmbeddingsSha256": "f03d85877b178fb088a78cafc6561a8528c8e1781774d944b14170cab76533ff",
+  "portoPklSha256": "8f2e3c03bd177f3456812865492203febb65b12cb178893b23aba9605bdb96f2",
+  "configuration": {
+    "dataset": "porto",
+    "metric": "haus",
+    "loss": "cheb",
+    "train_mode": "both",
+    "cell_size": 100,
+    "mu": 0.5,
+    "emb_dim": 128
+  },
+  "library": {
+    "count": 7000,
+    "dimension": 128,
+    "globalOffset": 3000,
+    "split": "test",
+    "embeddingDtype": "float32-little-endian",
+    "geometryDtype": "float64-little-endian",
+    "offsetDtype": "uint32-little-endian",
+    "geometryCoordinateOrder": [
+      "longitude",
+      "latitude"
+    ]
+  },
+  "preprocessing": {
+    "bboxWgs84": [
+      -8.7005,
+      41.1001,
+      -8.5192,
+      41.2086
+    ],
+    "mercatorRadius": 6378137.0,
+    "gridOriginMercator": [
+      -968535.2296468767,
+      5027117.621546069
+    ],
+    "meanFloat32": [
+      -959490.8125,
+      5035834.5
+    ],
+    "stdFloat32": [
+      2872.9873046875,
+      1899.1400146484375
+    ],
+    "normalizationReference": "all raw Mercator points in the author's 7000-trajectory test split",
+    "removeConsecutiveDuplicateCells": true,
+    "retain": "first original point per cell run",
+    "float32At": [
+      "Mercator tensor",
+      "cell-origin subtraction",
+      "normalization subtraction and division"
+    ],
+    "validMaskMeaning": "true = valid point",
+    "modelBatchSize": 1
+  },
+  "inputPolicy": {
+    "rawGpsMinPoints": 20,
+    "rawGpsMaxPoints": 200,
+    "drawingPolicyStatus": "pending; do not treat point count as route length"
+  },
+  "routeLengthStudy": {
+    "count": 7000,
+    "method": "spherical haversine polyline length, radius=6371008.8 m",
+    "percentilesMeters": {
+      "0": 76.28183388545987,
+      "1": 1083.2412824648586,
+      "5": 1615.7422121091092,
+      "25": 2674.035882091377,
+      "50": 4016.930389422827,
+      "75": 5962.742977057432,
+      "95": 10729.189872007173,
+      "99": 13959.2370972274,
+      "100": 24747.347978545888
+    },
+    "notAnAccuracyGuarantee": true
+  },
+  "ranking": {
+    "metric": "Chebyshev",
+    "order": "ascending",
+    "tieBreak": "ascending global trajectory index",
+    "excludeSelf": "ID query only; no exclusion for a new drawing",
+    "displaySimilarity": "exp(-distance), not a calibrated probability"
+  },
+  "groundTruthForNewDrawings": "unavailable unless independently computed; never reuse a saved matrix row",
+  "testMetrics": {
+    "1": 0.601143,
+    "5": 0.716514,
+    "10": 0.768971,
+    "20": 0.809986,
+    "50": 0.861586,
+    "R10@50": 0.991329
+  },
+  "assets": {
+    "library-gps.f64": {
+      "bytes": 5529952,
+      "sha256": "a2b4ec1c34c8bd0e7b04d731a8e4e7b4ec42638f1ccb9fa82e446cdd04fb683b"
+    },
+    "library-offsets.u32": {
+      "bytes": 28004,
+      "sha256": "3fcaae014820c1aa32893a6805f601aa7e2c56f307dc90934a80d8b820b02012"
+    },
+    "library.f32": {
+      "bytes": 3584000,
+      "sha256": "303456a7d979ec64d6e3ad252ae707e58ed9cb8fd2de7a182563dd5cc6d6f676"
+    },
+    "trajagg.onnx": {
+      "bytes": 770124,
+      "sha256": "05a50f2f5a59c18793a09f130a5405c1180f2f91f9d98d2ed5603a0354e9cc64"
+    }
+  }
+}
