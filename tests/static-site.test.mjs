@@ -5,6 +5,18 @@ import { readDataJson } from '../src/data.ts';
 
 const root = new URL('../', import.meta.url);
 
+test('English browser notice stays below the header and above both query modes', async () => {
+  const app = await readFile(new URL('src/App.tsx', root), 'utf8');
+  const notice = app.match(/<aside className="browser-notice"[^>]*>[\s\S]*?<\/aside>/)?.[0];
+  assert.ok(notice);
+  assert.match(notice, /role="note" aria-label="Browser notice"/);
+  const text = notice.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  assert.ok(text.includes('Browser notice: Please keep this page in English and turn off automatic translation. Browser translation may disrupt interactive features. If the page becomes blank, restore the original language and reload.'));
+  assert.ok(app.indexOf('</header>') < app.indexOf(notice));
+  assert.ok(app.indexOf(notice) < app.indexOf('<div className="academic-notice">'));
+  assert.doesNotMatch(notice, /onClick|\shidden(?:[\s=>])|\{queryMode/);
+});
+
 test('website exposes only Library and Draw route without an upload or lab API branch', async () => {
   const app = await readFile(new URL('src/App.tsx', root), 'utf8');
   assert.match(app, /useState<'library' \| 'draw'>/);
@@ -69,4 +81,6 @@ test('production application contains no private endpoint or removed connection/
   assert.doesNotMatch(bundle, /Connect optional lab API|Disconnect optional lab API|VITE_API_BASE_URL|127\.0\.0\.1:8000|10\.140\.34\.37|\/api\/(?:queries|retrieve|config|health|uploads)|Choose a GPS file|Validate & preview/);
   assert.match(bundle, /Draw route/);
   assert.match(bundle, /Library/);
+  assert.match(bundle, /Browser notice:/);
+  assert.match(bundle, /Please keep this page in English and turn off automatic translation\./);
 });

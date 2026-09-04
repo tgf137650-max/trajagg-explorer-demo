@@ -592,6 +592,10 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="topbar"><div className="brand-block"><h1>TrajAgg Explorer</h1><span className={`data-status-badge ${queryMode === 'draw' ? 'data-status-badge--live' : ''}`}>{queryMode === 'draw' ? 'Draw & retrieve · on your device' : '100 validated Porto queries'}</span></div><div className="top-config" aria-label="Fixed configuration"><Chip>⌖ Porto</Chip><Chip>◈ Hausdorff</Chip><Chip>⌁ Chebyshev</Chip><Chip>▦ 100 m grid</Chip><Chip><i>μ</i> = 0.5</Chip><Chip>⌘ Hybrid</Chip></div></header>
+      <aside className="browser-notice" role="note" aria-label="Browser notice">
+        <span className="browser-notice__icon" aria-hidden="true">i</span>
+        <p><strong>Browser notice:</strong> Please keep this page in English and turn off automatic translation. Browser translation may disrupt interactive features. If the page becomes blank, restore the original language and reload.</p>
+      </aside>
       <div className="academic-notice"><b>Academic demo</b><span>{queryMode === 'draw' ? 'Manually drawn query · real Porto candidate library · browser inference without a lab connection.' : indexData.dataStatement}</span><span className="notice-divider" /><span>Fixed configuration · best validation-HR@1 checkpoint at Epoch {indexData.reproduction.bestEpoch}</span></div>
       {retrievalError && <div className="retrieval-error" role="alert">{retrievalError}</div>}
 
